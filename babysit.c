@@ -314,8 +314,45 @@ static void echo(const char *buf, size_t n) {
     last_read = now_ms();
 }
 
+/*
+ * Write to the log. The disk can fill up, or a file size limit be reached,
+ * while the command is running; that is no reason to stop it, but it must
+ * not pass unnoticed either. The caller is told once, on its stdout, and
+ * what the log missed is counted. Each later write tries again, and as soon
+ * as one gets through the log first gets a line saying how much is missing
+ * at that point.
+ */
+static unsigned long long lost; /* bytes the log did not take */
+static int lost_err, lost_told;
+
+static void log_write(const char *buf, size_t n) {
+  char note[256];
+  int k;
+
+  if (lost) {
+    k = snprintf(note, sizeof note,
+                 "babysit: %llu bytes of output are missing here: %s\n", lost,
+                 strerror(lost_err));
+    if (write_all(log_fd, note, (size_t)k) == 0)
+      lost = 0;
+  }
+  if (!lost && write_all(log_fd, buf, n) == 0)
+    return;
+  if (!lost)
+    lost_err = errno;
+  lost += n;
+  if (!lost_told) {
+    lost_told = 1;
+    k = snprintf(note, sizeof note,
+                 "babysit: warning: cannot write to the log (%s); output is "
+                 "missing from it from here on\n",
+                 strerror(lost_err));
+    echo(note, (size_t)k);
+  }
+}
+
 static void emit(const char *buf, size_t n) {
-  write_all(log_fd, buf, n);
+  log_write(buf, n);
   echo(buf, n);
 }
 
@@ -425,6 +462,7 @@ static void babysitter(const char *logdir, const char *base, long parent_pid,
   pid_t child;
 
   signal(SIGPIPE, SIG_IGN);
+  signal(SIGXFSZ, SIG_IGN); /* a log at its size limit: EFBIG, not death */
   watching = 1;
 
   /* Keep only the caller's stdout (for echoing); drop stdin and stderr. */
@@ -471,6 +509,7 @@ static void babysitter(const char *logdir, const char *base, long parent_pid,
     close(chld_pipe[1]);
     close(status_fd);
     signal(SIGPIPE, SIG_DFL);
+    signal(SIGXFSZ, SIG_DFL);
     signal(SIGCHLD, SIG_DFL);
     /* Wait until the babysitter has the log file open. */
     if (read(go[0], &c, 1) != 1)

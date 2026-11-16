@@ -166,6 +166,18 @@ or
 .BI "Process killed by signal " N
 once the command is gone.
 .PP
+If the log cannot be written while the command is running, because the disk
+has filled up or a file size limit was reached, the command is left running
+and its output is still echoed.
+.B babysit
+prints one warning on its stdout, and if writing works again later the log
+gets a line saying how many bytes are missing at that point.
+A log that ends without a
+.B "Process exited"
+or
+.B "Process killed"
+line is not proof that the command is still running.
+.PP
 Output that does not end in a newline, such as a prompt, is logged as a line
 of its own after one second, or at once when an idle stall is reported.
 Lines longer than 4096 bytes are split.
