@@ -111,6 +111,25 @@ handles an actual collision itself (see
 .PP
 A log directory that still has a writer is never archived or deleted.
 .PP
+The service only ever packs or deletes what
+.BR babysit (1)
+and it created: directories named like a boot
+.RI ( YYYYmmdd-HHMMSS
+or
+.BR unknown-boot ),
+the numbered generations and
+.IB N .tar.gz
+files inside the current one, and
+.BI babysit_logs_ * .tar.gz
+files in
+.IR LOGDIR /archive .
+Anything else found in
+.I LOGDIR
+is left alone.
+It is still best to give
+.B babysit
+a directory of its own.
+.PP
 Only one
 .B babysitd
 works on a log directory at a time.

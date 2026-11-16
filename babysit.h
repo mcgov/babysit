@@ -278,6 +278,39 @@ static inline void current_boot(const char *logdir, char *stamp, size_t n) {
     unlink(tmp);
 }
 
+/*
+ * Is NAME the name babysit gives a boot directory: YYYYmmdd-HHMMSS, or
+ * "unknown-boot"? babysitd touches nothing else in the log directory.
+ */
+static inline int is_boot_name(const char *name) {
+  int i;
+
+  if (strcmp(name, UNKNOWN_BOOT) == 0)
+    return 1;
+  for (i = 0; i < 15; i++) {
+    if (i == 8 ? name[i] != '-' : (name[i] < '0' || name[i] > '9'))
+      return 0;
+  }
+  return name[15] == '\0';
+}
+
+/* Is NAME "<number>.tar.gz", a packed generation? */
+static inline int is_packed_gen_name(const char *name) {
+  const char *p = name;
+
+  while (*p >= '0' && *p <= '9')
+    p++;
+  return p != name && strcmp(p, ".tar.gz") == 0;
+}
+
+/* Is NAME "babysit_logs_<something>.tar.gz", the archive of a boot? */
+static inline int is_archive_name(const char *name) {
+  size_t len = strlen(name);
+
+  return len > 20 && strncmp(name, "babysit_logs_", 13) == 0 &&
+         strcmp(name + len - 7, ".tar.gz") == 0;
+}
+
 /* Take the writer lock on an open log. */
 static inline int lock_log(int fd) {
   struct flock fl;

@@ -417,8 +417,9 @@ static void archive_old_boots(const char *current) {
   while ((de = readdir(d)) != NULL) {
     const char *name = de->d_name;
 
-    if (name[0] == '.' || name[0] == '-' || strcmp(name, "archive") == 0 ||
-        strcmp(name, current) == 0)
+    /* Only what babysit itself names: the log directory may hold other
+     * things, and they are not ours to pack and remove. */
+    if (!is_boot_name(name) || strcmp(name, current) == 0)
       continue;
     snprintf(from, sizeof from, "%s/%s", logdir, name);
     if (stat(from, &sb) < 0 || !S_ISDIR(sb.st_mode))
@@ -518,10 +519,7 @@ static void check_disk(const char *current, long limit, int rate_limit) {
 static void consider_oldest(const char *path, char *oldest, size_t n,
                             time_t *oldest_time) {
   struct stat sb;
-  size_t len = strlen(path);
 
-  if (len < 7 || strcmp(path + len - 7, ".tar.gz") != 0)
-    return;
   if (stat(path, &sb) < 0 || !S_ISREG(sb.st_mode))
     return;
   if (oldest[0] && sb.st_mtime >= *oldest_time)
@@ -530,8 +528,9 @@ static void consider_oldest(const char *path, char *oldest, size_t n,
   *oldest_time = sb.st_mtime;
 }
 
-static void scan_tarballs(const char *dir, char *oldest, size_t n,
-                          time_t *oldest_time) {
+/* Consider the tarballs in DIR whose names IS_OURS accepts. */
+static void scan_tarballs(const char *dir, int (*is_ours)(const char *),
+                          char *oldest, size_t n, time_t *oldest_time) {
   char path[PATH_BUF + 600];
   struct dirent *de;
   DIR *d = opendir(dir);
@@ -539,6 +538,8 @@ static void scan_tarballs(const char *dir, char *oldest, size_t n,
   if (!d)
     return;
   while ((de = readdir(d)) != NULL) {
+    if (!is_ours(de->d_name))
+      continue;
     snprintf(path, sizeof path, "%s/%s", dir, de->d_name);
     consider_oldest(path, oldest, n, oldest_time);
   }
@@ -569,9 +570,9 @@ static void free_disk(const char *current, long limit) {
     oldest[0] = '\0';
     oldest_time = 0;
     snprintf(dir, sizeof dir, "%s/archive", logdir);
-    scan_tarballs(dir, oldest, sizeof oldest, &oldest_time);
+    scan_tarballs(dir, is_archive_name, oldest, sizeof oldest, &oldest_time);
     snprintf(dir, sizeof dir, "%s/%s", logdir, current);
-    scan_tarballs(dir, oldest, sizeof oldest, &oldest_time);
+    scan_tarballs(dir, is_packed_gen_name, oldest, sizeof oldest, &oldest_time);
     if (!oldest[0] || unlink(oldest) < 0)
       break;
     removed++;
@@ -650,7 +651,7 @@ static void clean_old(long max_age_days, const char *current) {
   d = opendir(dir);
   if (d != NULL) {
     while ((de = readdir(d)) != NULL) {
-      if (de->d_name[0] == '.')
+      if (!is_archive_name(de->d_name))
         continue;
       snprintf(path, sizeof path, "%s/%s", dir, de->d_name);
       if (stat(path, &sb) == 0 && S_ISREG(sb.st_mode) && sb.st_mtime < cutoff &&
@@ -669,8 +670,9 @@ static void clean_old(long max_age_days, const char *current) {
       snprintf(path, sizeof path, "%s/%s", dir, de->d_name);
       if (stat(path, &sb) < 0)
         continue;
-      if (S_ISREG(sb.st_mode)) { /* a packed generation */
-        if (sb.st_mtime < cutoff && unlink(path) == 0)
+      if (S_ISREG(sb.st_mode)) {
+        if (is_packed_gen_name(de->d_name) && sb.st_mtime < cutoff &&
+            unlink(path) == 0)
           removed++;
       } else if (S_ISDIR(sb.st_mode) && is_pid_name(de->d_name)) {
         removed += clean_generation(path, cutoff);
