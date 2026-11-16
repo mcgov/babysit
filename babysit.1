@@ -354,6 +354,36 @@ stdout, and keeps logging.
 If the command exits while its own children still hold its stdout or stderr
 open, the exit is reported and logged at once, and their later output is
 still appended to the log.
+.SH CAVEATS
+.B babysit
+reports what it can observe from outside: bytes arriving on two pipes, a
+line that matches, the clock, an exit status.
+It does not know whether the command is healthy, making progress or stuck,
+and it never stops the command.
+Each of its answers means exactly what is said below and no more; what to do
+about it is for the caller to decide.
+.SS "\-\-idle means no output, not hung"
+A command that is working hard without printing anything is reported as
+stalled, and one that is stuck in a loop printing the same line is not.
+Status 125 is a reason to go and look, not a verdict.
+.PP
+Output buffering makes this worse than it sounds.
+Most programs flush each line when stdout is a terminal but collect several
+kilobytes before writing when it is a pipe, as it is under
+.BR babysit .
+A program that visibly prints a line a second in a terminal can therefore be
+silent for minutes here and deliver everything at once, or only when it
+exits.
+Where that matters, turn the buffering off in the command:
+.B "stdbuf \-oL"
+.I command
+for programs using C stdio,
+.B "python \-u"
+or
+.BR PYTHONUNBUFFERED=1 ,
+and the equivalent for other runtimes.
+The same delay applies to
+.BR \-\-expect .
 .SH EXAMPLES
 Start a server and return once it is listening:
 .PP
