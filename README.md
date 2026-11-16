@@ -25,6 +25,39 @@ babysit --idle 2m -- make -j8
 | 126 / 127 | command could not be executed / was not found |
 | 2 | usage or internal error |
 
+## Example: waiting for a server that might never come up
+
+The usual way to wait for a server to be ready looks reasonable:
+
+```sh
+./server --port 8080 > server.log 2>&1 &
+tail -f server.log | grep -q 'Listening on'   # wait until it's ready...
+./run-tests
+```
+
+If the server crashes or hangs before it prints that line, `tail -f` never
+ends and this waits forever. With `babysit`:
+
+```sh
+babysit --expect 'Listening on' --idle 30s -- ./server --port 8080 &
+ppid=$!
+wait "$ppid"; rc=$?
+
+bbid=$(babysit --get-child-pid "$ppid")
+log=$(babysit --get-child-log "$ppid")
+
+case $rc in
+  0)   echo "server is up as bbid $bbid" ;;
+  125) echo "no output for 30s; bbid $bbid is still running, maybe stuck" ;;
+  *)   echo "server died during start-up (status $rc):"; tail -n 20 "$log" ;;
+esac
+tail -f "$log"
+```
+
+`--get-child-pid` and `--get-child-log` take the pid of the `babysit` you
+started and print the command's pid and the path of its log. They print
+nothing and exit 1 if the command was never started (status 2, 126 or 127).
+
 Each command is logged to
 
     ~/.local/var/log/babysit/<boot time>/<generation>/<babysit pid>/<command pid>/log
