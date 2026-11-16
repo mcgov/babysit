@@ -393,6 +393,12 @@ across either kind of break.
 Text after a NUL byte in a line is not seen.
 A prompt that does not end in a newline is matched only once it has been
 logged, about a second after it was printed.
+.SS "\-\-detach means started, not running"
+Status 0 from
+.B \-\-detach
+says that the command was executed.
+A command that fails a moment later, on a bad argument for instance, has
+still been started; its log says how it ended.
 .SH EXAMPLES
 Start a server and return once it is listening:
 .PP
