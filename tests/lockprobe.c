@@ -16,7 +16,7 @@
  * LOG and keeps it for SECONDS, so a test can have a "live" log in a
  * directory of its choosing.
  */
-#include "../babysit.h"
+#include "../src/babysit.h"
 
 int main(int argc, char **argv) {
   int i, any = 0;

@@ -158,7 +158,7 @@ make deb             # needs dpkg-buildpackage and debhelper
 gmake freebsd-pkg    # on FreeBSD; needs pkg
 ```
 
-The version is defined once, as `BABYSIT_VERSION` in `babysit.h`;
+The version is defined once, as `BABYSIT_VERSION` in `src/babysit.h`;
 `debian/changelog` must start with the same version.
 
 ## License

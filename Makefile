@@ -20,23 +20,25 @@ else
 UNITDIR ?=
 endif
 
-VERSION := $(shell sed -n 's/^\#define BABYSIT_VERSION "\(.*\)"/\1/p' babysit.h)
+VERSION := $(shell sed -n 's/^\#define BABYSIT_VERSION "\(.*\)"/\1/p' src/babysit.h)
 ARCH    := $(shell uname -m)
 BUILD    = build
 
-# babysit is built from babysit.c, which holds main(), and the babysit_*.c
-# files beside it; babysit_internal.h is what they share. babysitd is one
-# file. babysit.h is shared by both programs.
-BABYSIT_SRCS = babysit.c babysit_cmdline.c babysit_time.c babysit_start.c \
-               babysit_sitter.c babysit_output.c babysit_control.c \
-               babysit_instance.c babysit_inspect.c babysit_watch.c
-BABYSIT_HDRS = babysit.h babysit_internal.h
+# The sources are in src/. babysit is built from babysit.c, which holds
+# main(), and the babysit_*.c files beside it; babysit_internal.h is what
+# they share. babysitd is one file. babysit.h is shared by both programs.
+BABYSIT_SRCS = src/babysit.c src/babysit_cmdline.c src/babysit_time.c \
+               src/babysit_start.c src/babysit_sitter.c \
+               src/babysit_output.c src/babysit_control.c \
+               src/babysit_instance.c src/babysit_inspect.c \
+               src/babysit_watch.c
+BABYSIT_HDRS = src/babysit.h src/babysit_internal.h
 
 PROGS    = $(BINDIR)/babysit $(BINDIR)/babysitd
 TESTBINS = $(BINDIR)/lockprobe
 MANPAGES = babysit.1 babysitd.8 babysit.conf.5
 DISTFILES = Makefile LICENSE README.md precommit.sh .clang-format \
-            .clang-tidy $(BABYSIT_SRCS) $(BABYSIT_HDRS) babysitd.c \
+            .clang-tidy src \
             $(MANPAGES) babysit.conf babysitd.service.in tests packaging \
             debian .gitlab-ci.yml
 
@@ -46,11 +48,11 @@ $(BINDIR)/babysit: $(BABYSIT_SRCS) $(BABYSIT_HDRS)
 	@mkdir -p $(BINDIR)
 	$(CC) -std=c99 $(CFLAGS) -o $@ $(BABYSIT_SRCS) $(LDFLAGS)
 
-$(BINDIR)/babysitd: babysitd.c babysit.h
+$(BINDIR)/babysitd: src/babysitd.c src/babysit.h
 	@mkdir -p $(BINDIR)
-	$(CC) -std=c99 $(CFLAGS) -o $@ babysitd.c $(LDFLAGS)
+	$(CC) -std=c99 $(CFLAGS) -o $@ src/babysitd.c $(LDFLAGS)
 
-$(BINDIR)/lockprobe: tests/lockprobe.c babysit.h
+$(BINDIR)/lockprobe: tests/lockprobe.c src/babysit.h
 	@mkdir -p $(BINDIR)
 	$(CC) -std=c99 $(CFLAGS) -o $@ tests/lockprobe.c $(LDFLAGS)
 
@@ -90,7 +92,7 @@ check-asan check-ubsan check-tsan: check-%:
 COVERAGE_MIN ?= 0
 COV = $(BUILD)/coverage
 COV_OBJECTS = $(COV)/babysit -object $(COV)/babysitd
-COV_SOURCES = $(BABYSIT_SRCS) babysitd.c babysit.h
+COV_SOURCES = $(BABYSIT_SRCS) src/babysitd.c src/babysit.h
 
 coverage:
 	rm -rf $(COV)

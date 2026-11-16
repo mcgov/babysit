@@ -50,7 +50,7 @@ for tool in clang-format clang-tidy "$cc" make; do
     command -v "$tool" >/dev/null || { echo "precommit: missing required tool: $tool" >&2; exit 2; }
 done
 
-sources=(babysit.c babysit_*.c babysit_internal.h babysitd.c babysit.h tests/lockprobe.c)
+sources=(src/*.c src/*.h tests/lockprobe.c)
 cflags=(-std=c99 -Wall -Wextra -pedantic -Werror)
 status=0
 
@@ -63,7 +63,7 @@ elif ! clang-format --dry-run --Werror "${sources[@]}"; then
 fi
 
 echo "== clang-tidy"
-for f in babysit.c babysit_*.c babysitd.c tests/lockprobe.c; do
+for f in src/*.c tests/lockprobe.c; do
     clang-tidy --quiet "$f" -- "${cflags[@]}" || status=1
 done
 

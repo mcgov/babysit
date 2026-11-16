@@ -13,7 +13,7 @@
 #   $bs, $bsd, $lp   paths of babysit, babysitd and the lockprobe helper
 #   $work            a scratch directory, removed when the test exits
 #   $today           today's date as babysit writes it in an identifier
-#   $version         the version defined in babysit.h
+#   $version         the version defined in src/babysit.h
 #   $old1m, $old10d  "touch -t" timestamps one minute and ten days ago
 #
 #   check DESC ACTUAL EXPECTED   pass if the two strings are equal
@@ -66,7 +66,7 @@ lp="$bindir/lockprobe"
 for tool in "$bs" "$bsd" "$lp"; do
     [ -x "$tool" ] || { echo "missing $tool: build it first (make all bin/lockprobe)" >&2; exit 2; }
 done
-version=$(sed -n 's/^#define BABYSIT_VERSION "\(.*\)"/\1/p' "$srcdir/babysit.h")
+version=$(sed -n 's/^#define BABYSIT_VERSION "\(.*\)"/\1/p' "$srcdir/src/babysit.h")
 
 work="$(mktemp -d)"
 lib_cleanup() {
