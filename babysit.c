@@ -804,6 +804,7 @@ int main(int argc, char **argv) {
   int detach = 0, i, n, st, status_pipe[2];
   struct msg m;
   pid_t pid, mid;
+  long self;
 
   for (i = 1; i < argc; i++) {
     if (strcmp(argv[i], "--") == 0) {
@@ -917,6 +918,7 @@ int main(int argc, char **argv) {
 
   /* Double fork + setsid: the babysitter is reparented to init and has no
    * controlling terminal, so it outlives us and our caller. */
+  self = (long)getpid(); /* not getppid() later: we may be gone by then */
   mid = fork();
   if (mid < 0) {
     perror("babysit: fork");
@@ -924,7 +926,6 @@ int main(int argc, char **argv) {
     return EXIT_USAGE;
   }
   if (mid == 0) {
-    long self = (long)getppid();
     pid_t bp;
 
     setsid();
