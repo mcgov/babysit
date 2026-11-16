@@ -73,6 +73,7 @@ static regex_t expect_re;
 static int log_fd = -1, status_fd = -1;
 static int watching; /* still echoing to the caller and running timers */
 static long long last_read;
+static long long timeout_at = -1; /* when --timeout expires, in now_ms() */
 static int chld_pipe[2] = {-1, -1};
 
 static void usage(FILE *f) {
@@ -248,9 +249,69 @@ static void release(int type, int value) {
   }
 }
 
+/*
+ * Copy output to the caller's stdout. The caller may read slowly or not at
+ * all, and a plain write() would then block for as long as it likes, with
+ * --timeout unable to fire and a killed parent going unnoticed. So wait for
+ * room with poll(), keeping an eye on both, and write no more at a time
+ * than a pipe that reports room is sure to take. The descriptor is shared
+ * with the caller, so it cannot simply be made non-blocking.
+ *
+ * Time spent waiting here is the caller's silence, not the command's, and
+ * does not count towards --idle.
+ */
 static void echo(const char *buf, size_t n) {
-  if (watching && write_all(1, buf, n) < 0)
-    release(MSG_DETACHED, 0); /* caller stopped reading */
+  struct pollfd p[2];
+  int waited = 0;
+
+  while (watching && n > 0) {
+    long long rem = -1;
+    ssize_t w;
+    int r;
+
+    if (timeout_at >= 0) {
+      rem = timeout_at - now_ms();
+      if (rem <= 0) {
+        release(MSG_TIMEOUT, 0);
+        break;
+      }
+    }
+    p[0].fd = 1;
+    p[0].events = POLLOUT;
+    p[1].fd = status_fd; /* errors out if the parent dies */
+    p[1].events = 0;
+    p[0].revents = p[1].revents = 0;
+    r = poll(p, 2, 0);
+    if (r == 0) {
+      if (rem > INT_MAX)
+        rem = INT_MAX;
+      waited = 1;
+      r = poll(p, 2, (int)rem); /* -1 without --timeout: no limit */
+    }
+    if (r < 0 && errno != EINTR) {
+      release(MSG_DETACHED, 0);
+      break;
+    }
+    if (r <= 0)
+      continue; /* the deadline is looked at again above */
+    if (p[1].revents) {
+      release(MSG_DETACHED, 0); /* parent was killed: let go too */
+      break;
+    }
+    if (!p[0].revents)
+      continue;
+    w = write(1, buf, n > PIPE_BUF ? PIPE_BUF : n);
+    if (w < 0) {
+      if (errno == EINTR || errno == EAGAIN)
+        continue;
+      release(MSG_DETACHED, 0); /* caller stopped reading */
+      break;
+    }
+    buf += w;
+    n -= (size_t)w;
+  }
+  if (waited)
+    last_read = now_ms();
 }
 
 static void emit(const char *buf, size_t n) {
@@ -494,6 +555,8 @@ static void babysitter(const char *logdir, const char *base, long parent_pid,
   /* Keep logging until the command is gone and both pipes are closed
    * (grandchildren may hold them open after the command itself exits). */
   start = last_read = now_ms();
+  if (timeout_ms > 0)
+    timeout_at = start + timeout_ms;
   while (out.fd >= 0 || err.fd >= 0 || !reaped) {
     long long now = now_ms(), wait = -1, rem;
     int r, timeout;
@@ -518,7 +581,7 @@ static void babysitter(const char *logdir, const char *base, long parent_pid,
       }
     }
     if (watching && timeout_ms > 0) {
-      rem = start + timeout_ms - now;
+      rem = timeout_at - now;
       if (rem <= 0)
         release(MSG_TIMEOUT, 0);
       else if (wait < 0 || rem < wait)
