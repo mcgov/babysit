@@ -384,6 +384,15 @@ or
 and the equivalent for other runtimes.
 The same delay applies to
 .BR \-\-expect .
+.SS "\-\-expect means a line matched, not ready"
+The pattern is tried against each line as it is written to the log, and a
+match says only that such a line was printed.
+A logged line is at most 4096 bytes, and output that stops without a newline
+for a second is logged as a line of its own, so a pattern cannot match
+across either kind of break.
+Text after a NUL byte in a line is not seen.
+A prompt that does not end in a newline is matched only once it has been
+logged, about a second after it was printed.
 .SH EXAMPLES
 Start a server and return once it is listening:
 .PP
