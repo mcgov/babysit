@@ -399,6 +399,18 @@ Status 0 from
 says that the command was executed.
 A command that fails a moment later, on a bad argument for instance, has
 still been started; its log says how it ended.
+.SS "The exit status is that of the command itself"
+.B babysit
+waits for the one process it started.
+A command that puts itself in the background, as many daemons do, exits at
+once with status 0, and that is what is reported, or status 1 if
+.B \-\-expect
+had not matched by then.
+Whatever it left running keeps its log as long as it holds the command's
+stdout or stderr open, but
+.B babysit
+knows nothing about how it fares.
+Run such programs in the foreground where they have an option for it.
 .SH EXAMPLES
 Start a server and return once it is listening:
 .PP
