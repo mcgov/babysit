@@ -177,6 +177,31 @@ static void say(int warning, const char *fmt, ...) {
   fflush(stderr);
 }
 
+/*
+ * Is stderr the journal stream systemd opened for us? JOURNAL_STREAM holds
+ * its device and inode numbers. The variable alone proves nothing: it is
+ * inherited by everything started from a service, a terminal for one, and
+ * priority prefixes there would only be noise.
+ */
+static int stderr_is_journal(void) {
+  const char *js = getenv("JOURNAL_STREAM");
+  unsigned long long dev, ino;
+  struct stat sb;
+  char *end;
+
+  if (!js || fstat(2, &sb) < 0)
+    return 0;
+  dev = strtoull(js, &end, 10);
+  if (end == js || *end != ':')
+    return 0;
+  js = end + 1;
+  ino = strtoull(js, &end, 10);
+  if (end == js || *end != '\0')
+    return 0;
+  return (unsigned long long)sb.st_dev == dev &&
+         (unsigned long long)sb.st_ino == ino;
+}
+
 static int parse_num(const char *s, long *out) {
   char *end;
   long v;
@@ -832,7 +857,7 @@ int main(int argc, char **argv) {
       return EXIT_USAGE;
     }
   }
-  journal = getenv("JOURNAL_STREAM") != NULL;
+  journal = stderr_is_journal();
 
   if (config) {
     load_config(config, 1, &max_age, &interval_s, &disk_pct, &delete_pct);
