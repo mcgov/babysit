@@ -1,0 +1,68 @@
+# SPDX-License-Identifier: MIT
+%global toolchain clang
+
+Name:           babysit
+Version:        @VERSION@
+Release:        1%{?dist}
+Summary:        Run a command detached, log it, and return early if it stalls
+License:        MIT
+URL:            https://gitlab.com/mowws/babysit
+Source0:        %{name}-%{version}.tar.gz
+
+BuildRequires:  clang
+BuildRequires:  make
+BuildRequires:  systemd-rpm-macros
+# for %%check
+BuildRequires:  bash
+BuildRequires:  tar
+BuildRequires:  gzip
+BuildRequires:  procps-ng
+BuildRequires:  findutils
+Requires:       tar
+Requires:       gzip
+
+%description
+babysit runs a command in the background under a babysitter process, echoes
+its output and writes it to a per-process log. It returns early when an
+expected line appears, when the command stops producing output, or after a
+timeout, and leaves the command running in every case.
+
+babysitd is an optional systemd user service that archives the logs of
+earlier boots, packs superseded log generations and expires old logs.
+
+%prep
+%autosetup
+
+%build
+%make_build CFLAGS="%{optflags}" LDFLAGS="%{build_ldflags}" PREFIX=%{_prefix}
+
+%install
+%make_install PREFIX=%{_prefix} MANDIR=%{_mandir} UNITDIR=%{_userunitdir} \
+    DOCDIR=%{_pkgdocdir} CFLAGS="%{optflags}" LDFLAGS="%{build_ldflags}"
+rm -f %{buildroot}%{_pkgdocdir}/LICENSE
+
+%check
+make test CFLAGS="%{optflags}" LDFLAGS="%{build_ldflags}" PREFIX=%{_prefix}
+
+%post
+%systemd_user_post babysitd.service
+
+%preun
+%systemd_user_preun babysitd.service
+
+%postun
+%systemd_user_postun_with_restart babysitd.service
+
+%files
+%license LICENSE
+%doc %{_pkgdocdir}
+%{_bindir}/babysit
+%{_bindir}/babysitd
+%{_mandir}/man1/babysit.1*
+%{_mandir}/man5/babysit.conf.5*
+%{_mandir}/man8/babysitd.8*
+%{_userunitdir}/babysitd.service
+
+%changelog
+* Sun Nov 15 2026 mcgov <matthew@mcgov.dev> - 0.1.0-1
+- Initial package

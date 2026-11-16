@@ -1,0 +1,20 @@
+Source: babysit
+Section: utils
+Priority: optional
+Maintainer: mcgov <matthew@mcgov.dev>
+Build-Depends: debhelper-compat (= 13), clang, procps
+Standards-Version: 4.7.0
+Homepage: https://gitlab.com/mowws/babysit
+Rules-Requires-Root: no
+
+Package: babysit
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, tar, gzip
+Description: run a command detached, log it, and return early if it stalls
+ babysit runs a command in the background under a babysitter process, echoes
+ its output and writes it to a per-process log. It returns early when an
+ expected line appears, when the command stops producing output, or after a
+ timeout, and leaves the command running in every case.
+ .
+ babysitd is an optional systemd user service that archives the logs of
+ earlier boots, packs superseded log generations and expires old logs.

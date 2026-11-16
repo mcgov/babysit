@@ -1,0 +1,58 @@
+.TH BABYSIT.CONF 5 "2026-11-15" "babysit" "File Formats"
+.SH NAME
+babysit.conf \- configuration for babysitd
+.SH SYNOPSIS
+.I $XDG_CONFIG_HOME/babysit/babysit.conf
+.br
+.I $HOME/.config/babysit/babysit.conf
+.SH DESCRIPTION
+Settings for
+.BR babysitd (8).
+.BR babysit (1)
+does not read this file.
+Each line is
+.IR key " = " value .
+Blank lines and lines starting with
+.B #
+are ignored.
+Unknown keys and bad values are reported and skipped.
+.TP
+.B max_age_days
+Delete archived logs and finished logs older than this many days.
+0 keeps them forever.
+Default: 30.
+.TP
+.B compact_at_disk_percent
+When the filesystem holding the logs is at least this full, in percent,
+start a new log generation so that the logs written so far can be packed
+and compressed.
+0 disables.
+Default: 90.
+.TP
+.B check_interval
+How often the service wakes up to do its housekeeping when nothing asks for
+it sooner: a number with an
+.BR s ,
+.BR m ,
+.B h
+or
+.B d
+suffix (seconds if there is none).
+.BR babysit (1)
+wakes the service itself when it starts a new log generation, so this can
+stay long.
+Default: 6h.
+.PP
+Command-line options of
+.B babysitd
+override this file.
+The file is read once, when the service starts.
+.SH EXAMPLE
+.nf
+max_age_days = 14
+compact_at_disk_percent = 80
+check_interval = 12h
+.fi
+.SH SEE ALSO
+.BR babysitd (8),
+.BR babysit (1)

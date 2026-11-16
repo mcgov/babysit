@@ -1,0 +1,158 @@
+# SPDX-License-Identifier: MIT
+# babysit - build, test, and package.
+#
+# clang/LLVM is the supported toolchain: the sanitizer and coverage targets
+# use LLVM's runtimes and tools (llvm-profdata, llvm-cov).
+
+CC       = clang
+CFLAGS  ?= -O2 -g -Wall -Wextra -pedantic
+PREFIX  ?= /usr/local
+BINDIR  ?= bin
+MANDIR  ?= $(PREFIX)/share/man
+DOCDIR  ?= $(PREFIX)/share/doc/babysit
+# systemd user units: $(PREFIX)/lib/systemd/user suits /usr and /usr/local;
+# for PREFIX=$$HOME/.local pass UNITDIR=$$HOME/.config/systemd/user.
+UNITDIR ?= $(PREFIX)/lib/systemd/user
+
+VERSION := $(shell sed -n 's/^\#define BABYSIT_VERSION "\(.*\)"/\1/p' babysit.h)
+ARCH    := $(shell uname -m)
+BUILD    = build
+
+PROGS    = $(BINDIR)/babysit $(BINDIR)/babysitd
+TESTBINS = $(BINDIR)/lockprobe
+MANPAGES = babysit.1 babysitd.8 babysit.conf.5
+DISTFILES = Makefile LICENSE README.md babysit.c babysitd.c babysit.h \
+            $(MANPAGES) babysit.conf babysitd.service.in tests packaging \
+            debian .gitlab-ci.yml
+
+all: $(PROGS) $(BINDIR)/babysitd.service
+
+$(BINDIR)/babysit: babysit.c babysit.h
+	@mkdir -p $(BINDIR)
+	$(CC) -std=c99 $(CFLAGS) -o $@ babysit.c $(LDFLAGS)
+
+$(BINDIR)/babysitd: babysitd.c babysit.h
+	@mkdir -p $(BINDIR)
+	$(CC) -std=c99 $(CFLAGS) -o $@ babysitd.c $(LDFLAGS)
+
+$(BINDIR)/lockprobe: tests/lockprobe.c babysit.h
+	@mkdir -p $(BINDIR)
+	$(CC) -std=c99 $(CFLAGS) -o $@ tests/lockprobe.c $(LDFLAGS)
+
+$(BINDIR)/babysitd.service: babysitd.service.in
+	@mkdir -p $(BINDIR)
+	sed 's|@BINDIR@|$(PREFIX)/bin|' babysitd.service.in > $@
+
+# ---- tests ---------------------------------------------------------------
+
+test check: all $(TESTBINS)
+	bash tests/run.sh --bindir $(BINDIR)
+
+# Sanitizer builds. A sanitizer report inside the detached babysitter would
+# otherwise go to /dev/null, so reports are written to files and any file
+# fails the run.
+SAN_asan  = address
+SAN_ubsan = undefined
+SAN_tsan  = thread
+SAN_CFLAGS = -O1 -g -fno-omit-frame-pointer -fno-sanitize-recover=all \
+             -Wall -Wextra -pedantic
+
+check-asan check-ubsan check-tsan: check-%:
+	rm -rf $(BUILD)/$*
+	mkdir -p $(BUILD)/$*/reports
+	$(MAKE) BINDIR=$(BUILD)/$* \
+	    CFLAGS="$(SAN_CFLAGS) -fsanitize=$(SAN_$*)" all $(BUILD)/$*/lockprobe
+	ASAN_OPTIONS=log_path=$(CURDIR)/$(BUILD)/$*/reports/asan:detect_leaks=1 \
+	UBSAN_OPTIONS=log_path=$(CURDIR)/$(BUILD)/$*/reports/ubsan:print_stacktrace=1 \
+	TSAN_OPTIONS=log_path=$(CURDIR)/$(BUILD)/$*/reports/tsan \
+	    bash tests/run.sh --bindir $(BUILD)/$*
+	@if ls $(BUILD)/$*/reports/* >/dev/null 2>&1; then \
+	    echo "sanitizer reports:"; cat $(BUILD)/$*/reports/*; exit 1; \
+	else echo "$*: no sanitizer reports"; fi
+
+# Coverage (LLVM source-based). Every process merges into the same raw
+# profile, including the detached babysitter (see COVERAGE_FLUSH).
+COVERAGE_MIN ?= 0
+COV = $(BUILD)/coverage
+COV_OBJECTS = $(COV)/babysit -object $(COV)/babysitd
+COV_SOURCES = babysit.c babysitd.c babysit.h
+
+coverage:
+	rm -rf $(COV)
+	mkdir -p $(COV)/raw
+	$(MAKE) BINDIR=$(COV) CFLAGS="-O0 -g -fprofile-instr-generate \
+	    -fcoverage-mapping -DBABYSIT_COVERAGE" all $(COV)/lockprobe
+	LLVM_PROFILE_FILE=$(CURDIR)/$(COV)/raw/babysit-%m.profraw \
+	    bash tests/run.sh --bindir $(COV)
+	llvm-profdata merge -sparse $(COV)/raw/*.profraw -o $(COV)/babysit.profdata
+	llvm-cov report $(COV_OBJECTS) -instr-profile=$(COV)/babysit.profdata \
+	    $(COV_SOURCES) | tee $(COV)/report.txt
+	llvm-cov show $(COV_OBJECTS) -instr-profile=$(COV)/babysit.profdata \
+	    -format=html -output-dir=$(COV)/html $(COV_SOURCES) >/dev/null
+	llvm-cov export $(COV_OBJECTS) -instr-profile=$(COV)/babysit.profdata \
+	    -format=lcov $(COV_SOURCES) > $(COV)/lcov.info
+	@awk '/^TOTAL/ { sub("%", "", $$10); \
+	    printf "Line coverage: %s%% (minimum $(COVERAGE_MIN)%%)\n", $$10; \
+	    exit ($$10 + 0 < $(COVERAGE_MIN)) }' $(COV)/report.txt
+
+lint:
+	shellcheck --severity=warning tests/run.sh
+	@for m in $(MANPAGES); do \
+	    out=$$(man --warnings -l $$m 2>&1 >/dev/null); \
+	    if [ -n "$$out" ]; then echo "$$m: $$out"; exit 1; fi; \
+	done; echo "man pages: ok"
+
+# ---- install -------------------------------------------------------------
+
+install: all
+	mkdir -p $(DESTDIR)$(PREFIX)/bin $(DESTDIR)$(MANDIR)/man1 \
+	    $(DESTDIR)$(MANDIR)/man5 $(DESTDIR)$(MANDIR)/man8 \
+	    $(DESTDIR)$(UNITDIR) $(DESTDIR)$(DOCDIR)
+	cp $(PROGS) $(DESTDIR)$(PREFIX)/bin/
+	cp babysit.1 $(DESTDIR)$(MANDIR)/man1/
+	cp babysit.conf.5 $(DESTDIR)$(MANDIR)/man5/
+	cp babysitd.8 $(DESTDIR)$(MANDIR)/man8/
+	cp $(BINDIR)/babysitd.service $(DESTDIR)$(UNITDIR)/
+	cp babysit.conf README.md LICENSE $(DESTDIR)$(DOCDIR)/
+
+# ---- packages ------------------------------------------------------------
+
+# Source tarball: build/babysit-VERSION.tar.gz
+dist:
+	@grep -q '^babysit ($(VERSION))' debian/changelog || \
+	    { echo "debian/changelog does not start with version $(VERSION)"; exit 1; }
+	rm -rf $(BUILD)/babysit-$(VERSION)
+	mkdir -p $(BUILD)/babysit-$(VERSION)
+	cp -R $(DISTFILES) $(BUILD)/babysit-$(VERSION)/
+	tar -C $(BUILD) -czf $(BUILD)/babysit-$(VERSION).tar.gz babysit-$(VERSION)
+	rm -rf $(BUILD)/babysit-$(VERSION)
+	@echo "$(BUILD)/babysit-$(VERSION).tar.gz"
+
+# Binary tarball: build/babysit-VERSION-linux-ARCH.tar.gz, rooted at /usr/local
+bindist:
+	rm -rf $(BUILD)/bindist
+	$(MAKE) BINDIR=$(BUILD)/bindist/obj PREFIX=/usr/local \
+	    DESTDIR=$(CURDIR)/$(BUILD)/bindist/root install
+	tar -C $(BUILD)/bindist/root -czf \
+	    $(BUILD)/babysit-$(VERSION)-linux-$(ARCH).tar.gz usr
+	rm -rf $(BUILD)/bindist
+	@echo "$(BUILD)/babysit-$(VERSION)-linux-$(ARCH).tar.gz"
+
+# build/rpm/RPMS/*/babysit-VERSION-*.rpm (needs rpmbuild)
+rpm: dist
+	sed 's/@VERSION@/$(VERSION)/' packaging/babysit.spec.in > $(BUILD)/babysit.spec
+	rpmbuild -bb --define "_topdir $(CURDIR)/$(BUILD)/rpm" \
+	    --define "_sourcedir $(CURDIR)/$(BUILD)" $(BUILD)/babysit.spec
+
+# build/deb/babysit_VERSION_*.deb (needs dpkg-buildpackage and debhelper)
+deb: dist
+	rm -rf $(BUILD)/deb
+	mkdir -p $(BUILD)/deb
+	tar -C $(BUILD)/deb -xzf $(BUILD)/babysit-$(VERSION).tar.gz
+	cd $(BUILD)/deb/babysit-$(VERSION) && dpkg-buildpackage -b -us -uc
+
+clean:
+	rm -rf bin $(BUILD)
+
+.PHONY: all test check check-asan check-ubsan check-tsan coverage lint \
+        install dist bindist rpm deb clean

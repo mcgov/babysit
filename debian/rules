@@ -1,0 +1,29 @@
+#!/usr/bin/make -f
+# SPDX-License-Identifier: MIT
+
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+include /usr/share/dpkg/buildflags.mk
+
+MAKEARGS = CC=clang CFLAGS="$(CFLAGS) $(CPPFLAGS)" LDFLAGS="$(LDFLAGS)" \
+           PREFIX=/usr
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	$(MAKE) $(MAKEARGS)
+
+override_dh_auto_test:
+ifeq (,$(filter nocheck,$(DEB_BUILD_OPTIONS)))
+	$(MAKE) $(MAKEARGS) test
+endif
+
+override_dh_auto_install:
+	$(MAKE) $(MAKEARGS) DESTDIR=$(CURDIR)/debian/babysit install
+	rm -f debian/babysit/usr/share/doc/babysit/LICENSE
+
+override_dh_auto_clean:
+	$(MAKE) clean
+
+# dwz cannot read the DWARF 5 sections clang emits.
+override_dh_dwz:

@@ -1,0 +1,124 @@
+# SPDX-License-Identifier: MIT
+#
+# Every job here runs for merge requests, for the default branch and for
+# tags. To make a green pipeline a condition for merging, also enable
+#   Settings > Merge requests > Merge checks > "Pipelines must succeed"
+# and protect the default branch; that part cannot be set from this file.
+
+stages:
+  - test
+  - package
+
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_TAG
+
+default:
+  image: fedora:44
+  interruptible: true
+
+.fedora-llvm:
+  before_script:
+    - dnf -y -q install clang llvm compiler-rt make tar gzip procps-ng
+        findutils diffutils man-db ShellCheck
+
+# The plain build must be warning-free.
+test:
+  extends: .fedora-llvm
+  stage: test
+  script:
+    - make CFLAGS="-O2 -g -Wall -Wextra -pedantic -Werror" test
+
+lint:
+  extends: .fedora-llvm
+  stage: test
+  script:
+    - make lint
+
+# AddressSanitizer (with LeakSanitizer): memory errors and leaks.
+asan:
+  extends: .fedora-llvm
+  stage: test
+  script:
+    - make check-asan
+  artifacts:
+    when: on_failure
+    paths: [build/asan/reports/]
+
+# UndefinedBehaviorSanitizer, with every finding fatal.
+ubsan:
+  extends: .fedora-llvm
+  stage: test
+  script:
+    - make check-ubsan
+  artifacts:
+    when: on_failure
+    paths: [build/ubsan/reports/]
+
+# ThreadSanitizer is the user-space counterpart of lockdep (lock-order
+# inversions, data races). babysit has no threads or mutexes, so this is a
+# guard against regressions rather than a source of findings today; the
+# locks babysit does use are fcntl() file locks, which the test suite
+# exercises directly (see "log locks" in tests/run.sh).
+tsan:
+  extends: .fedora-llvm
+  stage: test
+  script:
+    - make check-tsan
+  artifacts:
+    when: on_failure
+    paths: [build/tsan/reports/]
+
+coverage:
+  extends: .fedora-llvm
+  stage: test
+  script:
+    - make coverage COVERAGE_MIN=85
+  coverage: '/^Line coverage: (\d+\.\d+)%/'
+  artifacts:
+    when: always
+    paths:
+      - build/coverage/html/
+      - build/coverage/report.txt
+      - build/coverage/lcov.info
+
+# A second libc and userland (Debian's), to keep the code portable.
+test-debian:
+  stage: test
+  image: debian:trixie
+  before_script:
+    - apt-get update -qq
+    - apt-get install -y -qq clang make procps tar gzip
+  script:
+    - make CFLAGS="-O2 -g -Wall -Wextra -pedantic -Werror" test
+
+tarball:
+  extends: .fedora-llvm
+  stage: package
+  script:
+    - make dist bindist
+  artifacts:
+    paths: [build/*.tar.gz]
+
+rpm:
+  stage: package
+  before_script:
+    - dnf -y -q install clang make tar gzip procps-ng findutils rpm-build
+        systemd-rpm-macros
+  script:
+    - make rpm
+  artifacts:
+    paths: [build/rpm/RPMS/]
+
+deb:
+  stage: package
+  image: debian:trixie
+  before_script:
+    - apt-get update -qq
+    - apt-get install -y -qq clang make procps tar gzip dpkg-dev debhelper
+  script:
+    - make deb
+  artifacts:
+    paths: [build/deb/*.deb]

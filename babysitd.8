@@ -1,0 +1,232 @@
+.TH BABYSITD 8 "2026-11-15" "babysit" "System Administration"
+.SH NAME
+babysitd \- housekeeping service for babysit logs
+.SH SYNOPSIS
+.B babysitd
+.RI [ options ]
+.SH DESCRIPTION
+.B babysitd
+looks after the log directory used by
+.BR babysit (1).
+It is meant to run as a systemd user service.
+It does not poll: it sleeps for
+.B check_interval
+(6 hours by default), does the five things below when it wakes, and goes
+back to sleep.
+.BR babysit (1)
+wakes it early when there is something to pack; see
+.BR "EARLY REQUESTS" .
+.TP
+.B Archive earlier boots
+.B babysit
+files its logs under
+.IR LOGDIR / boot-time / ,
+one directory per boot.
+Every such directory other than the current boot's is packed, with
+whatever generations and packed generations it holds, into
+.PP
+.RS
+.RS
+.IR LOGDIR /archive/babysit_logs_ boot-time .tar.gz
+.RE
+.RE
+.IP
+and then removed, so an archive is named after the boot its logs came from,
+not after the time it was made.
+The check is made on start and at every scheduled wake-up, so it does not
+matter how long after a reboot the service first runs.
+An existing archive is never overwritten; a second one for the same boot
+gets a
+.B .2
+before the extension.
+Archives are made with
+.BR tar (1);
+if that fails the directory is left in place and a warning is logged.
+.TP
+.B Pack superseded generations
+Within a boot,
+.B babysit
+logs to
+.IR boot-time / N / ,
+and starts generation
+.IR N +1
+when a pid comes round again (see
+.BR "PID REUSE" " in " babysit (1)).
+Whenever it wakes, the service looks for generations of the current boot
+that are not the highest.
+Each one that has had no new log for two seconds and whose logs all lack a
+writer is replaced by
+.IR boot-time / N .tar.gz .
+A generation with a command still logging to it is left alone; only while
+one is waiting like this does the service look again every 30 seconds.
+Whether a log has a writer is decided by the write lock its babysitter
+holds, not by inspecting open file descriptors.
+.TP
+.B Pack early when the disk fills up
+Whenever it wakes, the service checks how full the filesystem holding
+.I LOGDIR
+is.
+At
+.B compact_at_disk_percent
+or more it starts a new generation itself, exactly as
+.B babysit
+would on a pid collision, so that the generation in use until then is packed
+and compressed as soon as its commands have finished.
+This is skipped while the current generation holds no logs, and done at most
+once every ten minutes, so a disk that is full of other things does not
+cause endless repacking.
+Packing compresses logs; it does not delete any.
+Space is only guaranteed to come back through
+.BR max_age_days .
+.TP
+.B Expire old logs
+Archives and packed generations whose file is older than
+.B max_age_days
+are deleted, as are finished logs of the current boot whose newest file is
+that old.
+This is done on start and at every scheduled wake-up.
+.TP
+.B Watch for pid rollover
+Whenever it wakes it reads the kernel's last allocated pid.
+If the value has gone down since the last look, the pid range has wrapped
+around and pids from this boot can now be reused; a warning is logged.
+With hours between looks this is a best-effort notice and can miss a
+wrap-around.
+Nothing else is done:
+.B babysit
+handles an actual collision itself (see
+.BR "PID REUSE" " in " babysit (1)).
+.PP
+A log directory that still has a writer is never archived or deleted.
+.PP
+Messages go to stderr, which under systemd is the journal:
+.PP
+.RS
+journalctl \-\-user \-u babysitd
+.RE
+.SH OPTIONS
+.TP
+.BI "\-l, \-\-log\-dir " DIR
+Log directory to look after.
+Default:
+.IR $HOME/.local/var/log/babysit .
+.TP
+.BI "\-c, \-\-config " FILE
+Configuration file; see
+.BR babysit.conf (5).
+Default:
+.IR $XDG_CONFIG_HOME/babysit/babysit.conf ,
+or
+.IR $HOME/.config/babysit/babysit.conf .
+A missing default file is not an error.
+.TP
+.BI "\-a, \-\-max\-age\-days " N
+Overrides
+.B max_age_days
+from the configuration file.
+0 keeps logs forever.
+Default: 30.
+.TP
+.BI "\-i, \-\-check\-interval " T
+Overrides
+.B check_interval
+from the configuration file.
+Default: 6h.
+.TP
+.BI "\-u, \-\-compact\-at\-disk\-percent " N
+Overrides
+.B compact_at_disk_percent
+from the configuration file.
+0 disables.
+Default: 90.
+.TP
+.BI "\-\-last\-pid\-file " FILE
+File holding the last allocated pid.
+Default:
+.IR /proc/sys/kernel/ns_last_pid .
+.TP
+.B \-1, \-\-once
+Archive and expire once, then exit.
+Useful from a shutdown hook or by hand.
+.TP
+.B \-h, \-\-help
+Show a summary of options.
+.SH EARLY REQUESTS
+The service listens on the FIFO
+.IR LOGDIR /.request .
+When
+.BR babysit (1)
+starts a new log generation it writes one byte there, and the service wakes
+at once and does its whole housekeeping pass, exactly as at a scheduled
+wake-up.
+That packs the generation that was just superseded (after the two-second
+quiet period, and once its commands have finished).
+.PP
+The write never blocks and its failure is ignored, so
+.B babysit
+behaves the same whether or not the service is running.
+If it is not, the superseded generation is simply packed the next time the
+service starts.
+Anything may wake the service the same way, which is also how to test it:
+lay out a log directory by hand, then
+.PP
+.RS
+echo 1 > $LOGDIR/.request
+.RE
+.PP
+What is written does not matter.
+Only do this while the service is running: a shell opening a FIFO that has
+no reader waits until one appears.
+.SH FAILURES
+Packing needs room for the tarball before the directory it replaces can be
+removed, so it can fail on a disk that is already full.
+The service is written so that this, or being killed part-way, loses
+nothing:
+.IP \(bu 2
+A tarball is written under a
+.B .partial
+name and renamed into place only when complete; the directory is removed
+only after that.
+.IP \(bu 2
+If packing fails, the partial file is removed, the directory is left as it
+was, a warning is logged, and packing is not attempted again for ten
+minutes.
+.IP \(bu 2
+.B .partial
+files left by a run that was killed are removed on the next start.
+.IP \(bu 2
+If a run was killed after the rename but before the directory was removed,
+the next run packs the directory again and replaces the tarball with an
+identical one.
+.PP
+.BR babysit (1)
+never waits on any of this.
+A command whose log cannot be created because the disk is full is not
+started, and
+.B babysit
+reports the error.
+.SH INSTALLATION
+.RS
+.nf
+systemctl \-\-user daemon\-reload
+systemctl \-\-user enable \-\-now babysitd
+.fi
+.RE
+.PP
+A user service starts when the user's systemd instance starts, which is at
+first login unless lingering is enabled
+.RB ( "loginctl enable\-linger" ).
+Because each boot logs to its own directory, a late start loses nothing:
+the earlier boot's logs are still there, untouched, to be archived.
+.SH PORTABILITY
+The last allocated pid is read from a Linux
+.I /proc
+file; where it is missing the rollover watch is switched off with a notice.
+Where there is no kernel boot id,
+.B babysit
+logs everything under
+.IR LOGDIR /unknown-boot ,
+which is always treated as the current boot and so is never archived.
+.SH SEE ALSO
+.BR babysit (1),
+.BR babysit.conf (5)

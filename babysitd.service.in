@@ -1,0 +1,11 @@
+[Unit]
+Description=Housekeeping for babysit logs (archive at boot, expire, pid rollover watch)
+Documentation=man:babysitd(8) man:babysit(1)
+
+[Service]
+Type=simple
+ExecStart=@BINDIR@/babysitd
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

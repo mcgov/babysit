@@ -1,0 +1,284 @@
+.TH BABYSIT 1 "2026-11-15" "babysit" "User Commands"
+.SH NAME
+babysit \- run a command detached, log it, and return early if it stalls
+.SH SYNOPSIS
+.B babysit
+.RI [ options ]
+.RB [ \-\- ]
+.I command
+.RI [ args ...]
+.SH DESCRIPTION
+.B babysit
+runs
+.I command
+in the background under a babysitter process, echoes its output, and writes
+that output to a log file.
+By default it waits for the command and returns its exit status.
+With the options below it returns earlier: when an expected line appears,
+when the command stops producing output, or after a fixed time.
+.PP
+Returning early never stops the command.
+The command keeps running and its output keeps going to the log, so the
+caller can come back later to read the log, wait longer, or kill it.
+.PP
+Three processes are involved:
+.TP
+.B parent
+The
+.B babysit
+that was invoked.
+It waits for the babysitter to say why it should return and turns that into
+an exit status.
+.TP
+.B babysitter
+A detached process in its own session.
+It reads the command's stdout and stderr, writes the log, echoes the log to
+the caller's stdout, and runs the timers.
+When the parent should return, it closes its copy of the caller's stdout and
+carries on logging.
+.TP
+.B child
+The command.
+It gets
+.I /dev/null
+as stdin, pipes to the babysitter as stdout and stderr, and its own process
+group.
+It never holds the caller's terminal or pipes, so a caller that waits for
+end-of-file on
+.BR babysit 's
+output is not kept waiting by it.
+.SH OPTIONS
+.TP
+.BI "\-e, \-\-expect " REGEX
+Return 0 as soon as an output line matches the POSIX extended regular
+expression
+.IR REGEX .
+The line is matched without its
+.B OUT:
+or
+.B ERR:
+prefix; lines from both streams are checked.
+.TP
+.B \-F, \-\-fixed
+Treat the
+.B \-\-expect
+pattern as a plain substring.
+.TP
+.BI "\-i, \-\-idle " SECS
+Return 125 if the command writes nothing to stdout or stderr for
+.IR SECS .
+Every byte restarts the timer.
+.TP
+.BI "\-t, \-\-timeout " SECS
+Return 124 once
+.I SECS
+have passed in total.
+.TP
+.B \-d, \-\-detach
+Return 0 as soon as the command has started.
+.TP
+.BI "\-l, \-\-log\-dir " DIR
+Base log directory.
+The default is
+.IR $HOME/.local/var/log/babysit .
+.TP
+.B \-h, \-\-help
+Show a summary of options.
+.PP
+.I SECS
+may be fractional and may carry an
+.BR s ,
+.B m
+or
+.B h
+suffix (0.5, 30s, 2m).
+.SH LOG FILES
+Each command is logged to
+.PP
+.RS
+.IR LOGDIR / boot-time / generation / babysit-pid / command-pid /log
+.RE
+.PP
+where
+.I boot-time
+is the time the system booted, as
+.IR YYYYmmdd-HHMMSS ,
+.I generation
+is a number that is 0 unless pids have been reused during this boot (see
+.BR "PID REUSE" ),
+.I babysit-pid
+is the pid of the
+.B babysit
+that was invoked and
+.I command-pid
+is the pid of the command.
+A caller that remembers the pid of the
+.B babysit
+it started can therefore find the command again:
+.PP
+.RS
+.nf
+ls   $LOGDIR/*/*/$babysit_pid/          # the command's pid
+cat  $LOGDIR/*/*/$babysit_pid/*/log     # its output so far
+kill \-\- \-$(ls $LOGDIR/*/*/$babysit_pid)  # stop it and its children
+.fi
+.RE
+.PP
+The full path is also printed as the first line of output
+.RB ( "Log file: ..." ).
+.PP
+Pids are only meaningful within one boot, which is why each boot has its own
+directory.
+The directory name is worked out the first time
+.B babysit
+runs after a boot and remembered in
+.IR LOGDIR /.boot ,
+so that every run during that boot uses the same one.
+Normally only the current boot's directory and one generation are present,
+so the wildcards above match exactly one path; earlier boots and superseded
+generations are packed away by
+.BR babysitd (8).
+On systems without a kernel boot id (anything but Linux) all logs go under
+.IR LOGDIR /unknown-boot .
+The log contains, in order:
+.IP \(bu 2
+the command line;
+.IP \(bu 2
+.BI "Process created with pid " N ;
+.IP \(bu 2
+every line of output, prefixed with
+.B "OUT: "
+(stdout) or
+.B "ERR: "
+(stderr);
+.IP \(bu 2
+.BI "Process exited with code " N
+or
+.BI "Process killed by signal " N
+once the command is gone.
+.PP
+Output that does not end in a newline, such as a prompt, is logged as a line
+of its own after one second, or at once when an idle stall is reported.
+Lines longer than 4096 bytes are split.
+.SH PID REUSE
+Log paths are built from pids, and pids are reused.
+After a reboot numbering starts again, which is why each boot logs to its own
+directory and cannot collide with another.
+Within one boot a pid is reused only after the system has run through its
+whole pid range, which is rare but possible on a long-lived machine.
+.PP
+.B babysit
+never overwrites or deletes a log to make room.
+Within a boot, logs are filed in numbered
+.IR generations ,
+starting at 0, and new logs always go to the highest-numbered one.
+Once the command's pid is known, and before the command is executed, the
+babysitter checks that generation for either of the two pids it is about to
+use:
+.IP \(bu 2
+.IR generation / babysit-pid
+exists, meaning an earlier
+.B babysit
+had the same pid; or
+.IP \(bu 2
+.IR generation /*/ command-pid
+exists, meaning an earlier command had the same pid.
+.PP
+If neither exists the log is created there.
+If either does, the pid range has wrapped around.
+The old log is left exactly as it is, whether or not it is still being
+written, and the new log goes into the next generation, which is created if
+need be.
+Every later
+.B babysit
+uses that generation too.
+The command is started in all cases; a pid collision is never an error.
+.PP
+Starting a new generation is also the request to pack the old one.
+While a babysitter is logging it holds a write lock on its log file, which
+the kernel releases when the babysitter exits for any reason, so a locked
+log is one that is still being written.
+The babysitter that starts a generation wakes
+.BR babysitd (8),
+if it is running, which looks for generations that are no longer the highest
+and, as soon as none of their logs is locked, replaces the directory
+.IR boot-time / N
+with
+.IR boot-time / N .tar.gz .
+Until then the superseded generation stays readable in place, and commands
+still running in it keep logging to it.
+A packed generation's number is not used again.
+.PP
+After a reboot,
+.BR babysitd (8)
+packs the whole of an earlier boot, generations included, into
+.IR LOGDIR /archive/babysit_logs_ boot-time .tar.gz ,
+and it deletes archives and finished logs that are older than its
+configured limit.
+Without
+.BR babysitd (8)
+nothing is packed or deleted; generations and boot directories simply
+accumulate.
+.SH EXIT STATUS
+.TP
+.I N
+The command exited with status
+.I N
+(128 plus the signal number if it was killed by a signal).
+.TP
+.B 0
+.B \-\-expect
+matched, or
+.B \-\-detach
+was given.
+.TP
+.B 1
+.B \-\-expect
+was given but the command exited with status 0 without a matching line.
+.TP
+.B 124
+.B \-\-timeout
+expired; the command is still running.
+.TP
+.B 125
+Nothing was written for
+.B \-\-idle
+seconds; the command is still running.
+.TP
+.B 126, 127
+The command could not be executed, or was not found.
+No log is left behind.
+.TP
+.B 2
+Usage or internal error.
+Nothing was started.
+.PP
+The reason for returning is also printed on stderr.
+A command that itself exits with one of the special statuses cannot be told
+apart by status alone; the last line of the log settles it.
+.SH NOTES
+Killing or interrupting
+.B babysit
+does not stop the command.
+The babysitter notices that its parent is gone, releases the caller's
+stdout, and keeps logging.
+.PP
+If the command exits while its own children still hold its stdout or stderr
+open, the exit is reported and logged at once, and their later output is
+still appended to the log.
+.SH EXAMPLES
+Start a server and return once it is listening:
+.PP
+.RS
+babysit \-\-expect 'Listening on' \-\-timeout 30 \-\- ./server \-\-port 8080
+.RE
+.PP
+Run a build, but come back if it goes quiet for two minutes:
+.PP
+.RS
+babysit \-\-idle 2m \-\- make \-j8
+.RE
+.SH SEE ALSO
+.BR babysitd (8),
+.BR babysit.conf (5),
+.BR timeout (1)
