@@ -14,18 +14,17 @@
  */
 #include "../babysit.h"
 
-int main(int argc, char **argv)
-{
-    int i, any = 0;
+int main(int argc, char **argv) {
+  int i, any = 0;
 
-    if (argc < 2) {
-        fprintf(stderr, "usage: lockprobe LOG...\n");
-        return 2;
-    }
-    for (i = 1; i < argc; i++) {
-        int busy = log_has_writer(argv[i]);
-        puts(busy ? "locked" : "unlocked");
-        any |= busy;
-    }
-    return any;
+  if (argc < 2) {
+    fprintf(stderr, "usage: lockprobe LOG...\n");
+    return 2;
+  }
+  for (i = 1; i < argc; i++) {
+    int busy = log_has_writer(argv[i]);
+    puts(busy ? "locked" : "unlocked");
+    any |= busy;
+  }
+  return any;
 }

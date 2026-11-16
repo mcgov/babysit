@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: MIT
+#
+# Every enabled check is an error (see precommit.sh). The exclusions:
+#   DeprecatedOrUnsafeBufferHandling  wants C11 Annex K (snprintf_s, ...),
+#                                     which no supported libc provides
+#   cert-err33-c                      wants the result of every fprintf to
+#                                     be checked
+#   misc-include-cleaner              disagrees with the one shared header
+#   easily-swappable-parameters,
+#   magic-numbers, identifier-length,
+#   function-cognitive-complexity     style opinions, not defects
+#   braces-around-statements          LLVM style omits them
+#   isolate-declaration               "int a, b;" is fine
+Checks: >
+  -*,
+  clang-analyzer-*,
+  bugprone-*,
+  cert-*,
+  misc-*,
+  performance-*,
+  portability-*,
+  readability-*,
+  -clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling,
+  -cert-err33-c,
+  -misc-include-cleaner,
+  -bugprone-easily-swappable-parameters,
+  -readability-magic-numbers,
+  -readability-identifier-length,
+  -readability-function-cognitive-complexity,
+  -readability-braces-around-statements,
+  -readability-isolate-declaration
+WarningsAsErrors: '*'
+HeaderFilterRegex: 'babysit\.h$'

@@ -5,7 +5,7 @@
 # use LLVM's runtimes and tools (llvm-profdata, llvm-cov).
 
 CC       = clang
-CFLAGS  ?= -O2 -g -Wall -Wextra -pedantic
+CFLAGS  ?= -O2 -g -Wall -Wextra -pedantic -Werror
 PREFIX  ?= /usr/local
 BINDIR  ?= bin
 MANDIR  ?= $(PREFIX)/share/man
@@ -27,7 +27,8 @@ BUILD    = build
 PROGS    = $(BINDIR)/babysit $(BINDIR)/babysitd
 TESTBINS = $(BINDIR)/lockprobe
 MANPAGES = babysit.1 babysitd.8 babysit.conf.5
-DISTFILES = Makefile LICENSE README.md babysit.c babysitd.c babysit.h \
+DISTFILES = Makefile LICENSE README.md precommit.sh .clang-format \
+            .clang-tidy babysit.c babysitd.c babysit.h \
             $(MANPAGES) babysit.conf babysitd.service.in tests packaging \
             debian .gitlab-ci.yml
 
@@ -61,14 +62,14 @@ SAN_asan  = address
 SAN_ubsan = undefined
 SAN_tsan  = thread
 SAN_CFLAGS = -O1 -g -fno-omit-frame-pointer -fno-sanitize-recover=all \
-             -Wall -Wextra -pedantic
+             -Wall -Wextra -pedantic -Werror
 
 check-asan check-ubsan check-tsan: check-%:
 	rm -rf $(BUILD)/$*
 	mkdir -p $(BUILD)/$*/reports
 	$(MAKE) BINDIR=$(BUILD)/$* \
 	    CFLAGS="$(SAN_CFLAGS) -fsanitize=$(SAN_$*)" all $(BUILD)/$*/lockprobe
-	ASAN_OPTIONS=log_path=$(CURDIR)/$(BUILD)/$*/reports/asan:detect_leaks=1 \
+	ASAN_OPTIONS=log_path=$(CURDIR)/$(BUILD)/$*/reports/asan \
 	UBSAN_OPTIONS=log_path=$(CURDIR)/$(BUILD)/$*/reports/ubsan:print_stacktrace=1 \
 	TSAN_OPTIONS=log_path=$(CURDIR)/$(BUILD)/$*/reports/tsan \
 	    bash tests/run.sh --bindir $(BUILD)/$*
@@ -86,7 +87,8 @@ COV_SOURCES = babysit.c babysitd.c babysit.h
 coverage:
 	rm -rf $(COV)
 	mkdir -p $(COV)/raw
-	$(MAKE) BINDIR=$(COV) CFLAGS="-O0 -g -fprofile-instr-generate \
+	$(MAKE) BINDIR=$(COV) CFLAGS="-O0 -g -Wall -Wextra -pedantic -Werror \
+	    -fprofile-instr-generate \
 	    -fcoverage-mapping -DBABYSIT_COVERAGE" all $(COV)/lockprobe
 	LLVM_PROFILE_FILE=$(CURDIR)/$(COV)/raw/babysit-%m.profraw \
 	    bash tests/run.sh --bindir $(COV)
@@ -101,8 +103,14 @@ coverage:
 	    printf "Line coverage: %s%% (minimum $(COVERAGE_MIN)%%)\n", $$10; \
 	    exit ($$10 + 0 < $(COVERAGE_MIN)) }' $(COV)/report.txt
 
+# The same targets on FreeBSD, in a throwaway QEMU VM (see the script's
+# --help). GitLab has no hosted FreeBSD runners, so this is run by hand.
+check-freebsd-vm:
+	bash tests/freebsd-vm.sh
+
 lint:
-	shellcheck --severity=warning tests/run.sh
+	shellcheck -x --severity=warning tests/run.sh tests/lib.sh \
+	    tests/freebsd-vm.sh tests/testcases/*-test.sh precommit.sh
 	@for m in $(MANPAGES); do \
 	    out=$$(groff -man -Tutf8 -ww -z $$m 2>&1); \
 	    if [ -n "$$out" ]; then echo "$$m: $$out"; exit 1; fi; \
@@ -171,5 +179,6 @@ freebsd-pkg:
 clean:
 	rm -rf bin $(BUILD)
 
-.PHONY: all test check check-asan check-ubsan check-tsan coverage lint \
+.PHONY: all test check check-asan check-ubsan check-tsan check-freebsd-vm \
+        coverage lint \
         install dist bindist rpm deb freebsd-pkg clean

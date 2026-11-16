@@ -29,6 +29,21 @@ and compressed.
 0 disables.
 Default: 90.
 .TP
+.B delete_at_disk_percent
+When that filesystem is at least this full, in percent, delete packed logs
+(archives of earlier boots and packed generations of the current boot),
+oldest first, until it is not or none are left.
+Live log directories are never deleted.
+This is the only setting that removes logs before they reach
+.BR max_age_days .
+If the disk is full of other files it will delete every packed log without
+bringing usage under the limit, so it is disabled unless set.
+It is best set above
+.BR compact_at_disk_percent ,
+so that compression is tried first.
+0 disables.
+Default: 0.
+.TP
 .B check_interval
 How often the service wakes up to do its housekeeping when nothing asks for
 it sooner: a number with an
@@ -51,6 +66,7 @@ The file is read once, when the service starts.
 .nf
 max_age_days = 14
 compact_at_disk_percent = 80
+delete_at_disk_percent = 95
 check_interval = 12h
 .fi
 .SH SEE ALSO

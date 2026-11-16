@@ -43,9 +43,10 @@ Full documentation is in the man pages: `babysit(1)`, `babysitd(8)` and
 | Platform | Status |
 |---|---|
 | Linux, x86_64 and aarch64 | supported; tested in CI |
-| FreeBSD, x86_64 and aarch64 | supported; CI needs a self-hosted runner |
+| FreeBSD, x86_64 | supported; tested with `make check-freebsd-vm` |
+| FreeBSD, aarch64 | expected to work; not tested |
 | macOS, other BSDs | best effort, untested |
-| Windows | experimental, under MSYS2 only; there is no native port |
+| Windows | not supported; a port would be a separate project |
 
 Without systemd, run `babysitd` from cron: see `babysitd(8)`, section
 WITHOUT SYSTEMD.
@@ -66,13 +67,28 @@ systemctl --user enable --now babysitd
 ## Testing
 
 ```sh
-make test            # plain build
-make check-asan      # AddressSanitizer + LeakSanitizer
+make test            # plain build; tests/run.sh --filter NAME runs a subset
+make check-asan      # AddressSanitizer (with leak detection on Linux)
 make check-ubsan     # UndefinedBehaviorSanitizer
 make check-tsan      # ThreadSanitizer
 make coverage        # LLVM source-based coverage, report in build/coverage/
 make lint            # shellcheck and man page warnings
+./precommit.sh       # clang-format (LLVM style), clang-tidy, -Werror build
+make check-freebsd-vm   # all of the above on FreeBSD, in a throwaway QEMU VM
 ```
+
+`./precommit.sh --install` makes it the repository's git pre-commit hook, and
+`./precommit.sh --fix` reformats the sources. It needs `clang-format` and
+`clang-tidy`.
+
+The test cases are in `tests/testcases/`, one file each, numbered in the
+order they run. Every file starts with a comment giving its goal, its
+procedure and what makes it fail, and can be run on its own.
+
+`check-freebsd-vm` downloads the official FreeBSD cloud image once (about
+670 MB, kept in `~/.cache/babysit/freebsd-vm`), boots a fresh copy of it,
+and runs the suite, the sanitizers and the package build inside it. See
+`tests/freebsd-vm.sh --help`.
 
 ## Packaging
 

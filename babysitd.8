@@ -11,7 +11,7 @@ looks after the log directory used by
 It is meant to run as a systemd user service.
 It does not poll: it sleeps for
 .B check_interval
-(6 hours by default), does the five things below when it wakes, and goes
+(6 hours by default), does the things below when it wakes, and goes
 back to sleep.
 .BR babysit (1)
 wakes it early when there is something to pack; see
@@ -76,8 +76,20 @@ This is skipped while the current generation holds no logs, and done at most
 once every ten minutes, so a disk that is full of other things does not
 cause endless repacking.
 Packing compresses logs; it does not delete any.
-Space is only guaranteed to come back through
-.BR max_age_days .
+.TP
+.B Delete under disk pressure
+This is off unless
+.B delete_at_disk_percent
+is set.
+When the filesystem is at least that full, the service deletes packed logs
+one at a time, oldest first, until usage is back under the limit or none are
+left.
+The candidates are the archives of earlier boots and the packed generations
+of the current boot; a live log directory is never deleted, so a command
+that is still running, and a generation not yet packed, are safe.
+Each deletion is logged as a warning.
+If usage is still over the limit once every packed log is gone, the rest of
+the space belongs to something else, and that is logged too.
 .TP
 .B Expire old logs
 Archives and packed generations whose file is older than
@@ -139,6 +151,13 @@ Overrides
 from the configuration file.
 0 disables.
 Default: 90.
+.TP
+.BI "\-D, \-\-delete\-at\-disk\-percent " N
+Overrides
+.B delete_at_disk_percent
+from the configuration file.
+0 disables.
+Default: 0.
 .TP
 .BI "\-\-last\-pid\-file " FILE
 File holding the last allocated pid.

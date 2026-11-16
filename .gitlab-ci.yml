@@ -5,6 +5,20 @@
 #   Settings > Merge requests > Merge checks > "Pipelines must succeed"
 # and protect the default branch; that part cannot be set from this file.
 
+# GitLab's own scanners. They add jobs to the "test" stage and report in
+# the merge request and under Secure > Vulnerability report:
+#   secret_detection   credentials committed to the repository
+#   semgrep-sast       static analysis of the C sources
+# There is nothing for dependency or container scanning to look at: the
+# project has no third-party dependencies and builds no images.
+include:
+  - template: Jobs/Secret-Detection.gitlab-ci.yml
+  - template: Jobs/SAST.gitlab-ci.yml
+
+variables:
+  # Run the scanners in merge request pipelines as well as on branches.
+  AST_ENABLE_MR_PIPELINES: "true"
+
 stages:
   - test
   - package
@@ -24,12 +38,12 @@ default:
     - dnf -y -q install clang llvm compiler-rt make tar gzip procps-ng
         findutils diffutils groff-base ShellCheck
 
-# The plain build must be warning-free.
+# The default build treats warnings as errors.
 test:
   extends: .fedora-llvm
   stage: test
   script:
-    - make CFLAGS="-O2 -g -Wall -Wextra -pedantic -Werror" test
+    - make test
 
 lint:
   extends: .fedora-llvm
@@ -37,7 +51,17 @@ lint:
   script:
     - make lint
 
-# AddressSanitizer (with LeakSanitizer): memory errors and leaks.
+# The same checks as the pre-commit hook: LLVM formatting, clang-tidy with
+# every finding an error, and a warnings-as-errors build.
+precommit:
+  stage: test
+  before_script:
+    - dnf -y -q install clang clang-tools-extra make
+  script:
+    - ./precommit.sh
+
+# AddressSanitizer: memory errors, and leaks (leak detection is on by
+# default on Linux).
 asan:
   extends: .fedora-llvm
   stage: test
@@ -105,9 +129,10 @@ test-arm64:
   script:
     - make CFLAGS="-O2 -g -Wall -Wextra -pedantic -Werror" test
 
-# GitLab has no hosted FreeBSD runners. Register a FreeBSD machine as a
-# runner with the tag "freebsd" (one per architecture you want covered) and
-# set the CI/CD variable ENABLE_FREEBSD=1 to turn this job on.
+# GitLab has no hosted FreeBSD runners. Until there is one of your own,
+# FreeBSD is tested by hand with "make check-freebsd-vm". To test it here,
+# register a FreeBSD machine as a runner with the tag "freebsd" (one per
+# architecture you want covered) and set the CI/CD variable ENABLE_FREEBSD=1.
 test-freebsd:
   stage: test
   tags: [freebsd]
@@ -115,6 +140,7 @@ test-freebsd:
     - if: $ENABLE_FREEBSD == "1"
   script:
     - gmake CFLAGS="-O2 -g -Wall -Wextra -pedantic -Werror" test
+    - gmake check-asan check-ubsan check-tsan
     - gmake freebsd-pkg
   artifacts:
     paths: [build/*.pkg]
@@ -131,21 +157,6 @@ test-macos:
   script:
     - brew install make bash
     - gmake CC=clang test
-
-# Windows is experimental: there is no native port, so this builds and runs
-# the suite under MSYS2's POSIX layer on a hosted Windows runner. It is here
-# to show what breaks and never blocks a merge.
-test-windows-msys2:
-  stage: test
-  tags: [saas-windows-medium-amd64]
-  allow_failure: true
-  variables:
-    MSYSTEM: MSYS
-    CHERE_INVOKING: "1"
-  script:
-    - choco install msys2 -y --no-progress --params "/NoUpdate /InstallDir:C:\msys64"
-    - C:\msys64\usr\bin\bash.exe -lc "pacman -S --noconfirm --needed clang make tar gzip procps-ng diffutils findutils"
-    - C:\msys64\usr\bin\bash.exe -lc "make test"
 
 tarball:
   extends: .fedora-llvm
