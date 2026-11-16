@@ -244,6 +244,10 @@ If packing fails, the partial file is removed, the directory is left as it
 was, a warning is logged, and packing is not attempted again for ten
 minutes.
 .IP \(bu 2
+The tarball, and then the directory holding it, are flushed to disk before
+the packed directory is touched, so a power failure cannot leave the
+directory gone and the tarball empty.
+.IP \(bu 2
 A packed directory is removed by first renaming it to
 .IB name .removing ,
 which either happens completely or not at all.

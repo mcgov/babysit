@@ -359,6 +359,48 @@ static int run_tar(const char *out, const char *dir, const char *name) {
 }
 
 /*
+ * Make sure a finished tarball is on disk, and then that its new name is,
+ * before the directory it replaces is removed: after a power failure the
+ * removal must not be the only one of the three that happened. Not every
+ * filesystem can sync a directory, so only the file's own sync is allowed
+ * to fail the pack.
+ */
+static int sync_file(const char *path) {
+  int fd = open(path, O_WRONLY), rc;
+
+  if (fd < 0)
+    return -1;
+  rc = fsync(fd);
+  if (close(fd) < 0)
+    rc = -1;
+  return rc;
+}
+
+static void sync_dir(const char *path) {
+  int fd = open(path, O_RDONLY);
+
+  if (fd >= 0) {
+    fsync(fd);
+    close(fd);
+  }
+}
+
+/*
+ * Pack PARENT/NAME into the tarball OUT, which lives in HOME, by way of
+ * TMP. Returns -1, with nothing left behind, if that did not work.
+ */
+static int pack(const char *tmp, const char *out, const char *home,
+                const char *parent, const char *name) {
+  if (run_tar(tmp, parent, name) < 0 || sync_file(tmp) < 0 ||
+      rename(tmp, out) < 0) {
+    unlink(tmp);
+    return -1;
+  }
+  sync_dir(home);
+  return 0;
+}
+
+/*
  * Pack every generation of the current boot except the newest, once it has
  * no writer left. babysit only ever adds logs to the newest generation, so
  * an older one can only become quieter. The grace period covers a babysit
@@ -403,8 +445,7 @@ static int compact_generations(const char *current) {
     }
     snprintf(out, sizeof out, "%s.tar.gz", from);
     snprintf(tmp, sizeof tmp, "%s.partial", out);
-    if (run_tar(tmp, bootdir, de->d_name) < 0 || rename(tmp, out) < 0) {
-      unlink(tmp);
+    if (pack(tmp, out, bootdir, bootdir, de->d_name) < 0) {
       pack_retry_at = time(NULL) + RETRY_PACK_S;
       say(1,
           "could not pack %s (disk full, or tar missing?); it is "
@@ -453,8 +494,7 @@ static void archive_old_boots(const char *current) {
     for (i = 2; stat(out, &sb) == 0 && i < 100; i++)
       snprintf(out, sizeof out, "%s/babysit_logs_%s.%d.tar.gz", adir, name, i);
     snprintf(tmp, sizeof tmp, "%s.partial", out);
-    if (run_tar(tmp, logdir, name) < 0 || rename(tmp, out) < 0) {
-      unlink(tmp);
+    if (pack(tmp, out, adir, logdir, name) < 0) {
       say(1, "could not archive %s (is tar installed?); left in place", from);
       continue;
     }
