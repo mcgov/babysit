@@ -147,7 +147,11 @@ Normally only the current boot's directory and one generation are present,
 so the wildcards above match exactly one path; earlier boots and superseded
 generations are packed away by
 .BR babysitd (8).
-On systems without a kernel boot id (anything but Linux) all logs go under
+Boots are told apart by the kernel's boot id on Linux and by the boot time
+elsewhere.
+Two boots less than two minutes apart cannot be told apart by boot time and
+share a directory.
+On a system that offers neither, all logs go under
 .IR LOGDIR /unknown-boot .
 The log contains, in order:
 .IP \(bu 2
