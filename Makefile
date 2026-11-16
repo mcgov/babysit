@@ -24,19 +24,27 @@ VERSION := $(shell sed -n 's/^\#define BABYSIT_VERSION "\(.*\)"/\1/p' babysit.h)
 ARCH    := $(shell uname -m)
 BUILD    = build
 
+# babysit is built from babysit.c, which holds main(), and the babysit_*.c
+# files beside it; babysit_internal.h is what they share. babysitd is one
+# file. babysit.h is shared by both programs.
+BABYSIT_SRCS = babysit.c babysit_cmdline.c babysit_time.c babysit_start.c \
+               babysit_sitter.c babysit_output.c babysit_control.c \
+               babysit_instance.c babysit_inspect.c babysit_watch.c
+BABYSIT_HDRS = babysit.h babysit_internal.h
+
 PROGS    = $(BINDIR)/babysit $(BINDIR)/babysitd
 TESTBINS = $(BINDIR)/lockprobe
 MANPAGES = babysit.1 babysitd.8 babysit.conf.5
 DISTFILES = Makefile LICENSE README.md precommit.sh .clang-format \
-            .clang-tidy babysit.c babysitd.c babysit.h \
+            .clang-tidy $(BABYSIT_SRCS) $(BABYSIT_HDRS) babysitd.c \
             $(MANPAGES) babysit.conf babysitd.service.in tests packaging \
             debian .gitlab-ci.yml
 
 all: $(PROGS) $(BINDIR)/babysitd.service
 
-$(BINDIR)/babysit: babysit.c babysit.h
+$(BINDIR)/babysit: $(BABYSIT_SRCS) $(BABYSIT_HDRS)
 	@mkdir -p $(BINDIR)
-	$(CC) -std=c99 $(CFLAGS) -o $@ babysit.c $(LDFLAGS)
+	$(CC) -std=c99 $(CFLAGS) -o $@ $(BABYSIT_SRCS) $(LDFLAGS)
 
 $(BINDIR)/babysitd: babysitd.c babysit.h
 	@mkdir -p $(BINDIR)
@@ -82,7 +90,7 @@ check-asan check-ubsan check-tsan: check-%:
 COVERAGE_MIN ?= 0
 COV = $(BUILD)/coverage
 COV_OBJECTS = $(COV)/babysit -object $(COV)/babysitd
-COV_SOURCES = babysit.c babysitd.c babysit.h
+COV_SOURCES = $(BABYSIT_SRCS) babysitd.c babysit.h
 
 coverage:
 	rm -rf $(COV)
