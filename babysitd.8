@@ -240,12 +240,21 @@ If packing fails, the partial file is removed, the directory is left as it
 was, a warning is logged, and packing is not attempted again for ten
 minutes.
 .IP \(bu 2
-.B .partial
-files left by a run that was killed are removed on the next start.
+A packed directory is removed by first renaming it to
+.IB name .removing ,
+which either happens completely or not at all.
+A run killed while removing it therefore never leaves a half-empty
+directory under its real name, which the next run would pack again over the
+complete tarball.
 .IP \(bu 2
-If a run was killed after the rename but before the directory was removed,
-the next run packs the directory again and replaces the tarball with an
-identical one.
+.B .partial
+files and
+.B .removing
+directories left by a run that was killed are removed on the next start.
+.IP \(bu 2
+If a run was killed after the tarball was renamed into place but before the
+directory was renamed away, the directory is still whole, and the next run
+packs it again and replaces the tarball with an identical one.
 .PP
 .BR babysit (1)
 never waits on any of this.

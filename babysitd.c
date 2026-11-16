@@ -44,8 +44,11 @@
  * is written under a .partial name and renamed into place, and only then is
  * the directory removed. If it fails (for instance because the disk is
  * already full) the partial file is removed, the directory stays, and the
- * attempt is not repeated for a while. Leftover .partial files from a
- * crashed run are removed on start.
+ * attempt is not repeated for a while. The directory is removed by first
+ * renaming it to <name>.removing, so that a run killed part-way never
+ * leaves a half-empty directory under its real name to be packed again
+ * over the complete tarball. Leftover .partial files and .removing
+ * directories from a crashed run are removed on start.
  *
  * Only one babysitd works on a log directory at a time. Each pass is done
  * holding a write lock on <log-dir>/.lock, so a second instance (a
@@ -317,6 +320,21 @@ static int boot_dir_has_writer(const char *bootdir) {
   return busy;
 }
 
+/*
+ * Remove a directory that has just been packed. It is renamed out of the
+ * way first, which is atomic: whatever happens after that, the directory
+ * is no longer there under the name that would get it packed again.
+ */
+static void discard(const char *path) {
+  char gone[PATH_BUF + 700];
+  int n = snprintf(gone, sizeof gone, "%s.removing", path);
+
+  if (n > 0 && (size_t)n < sizeof gone && rename(path, gone) == 0)
+    remove_tree(gone);
+  else
+    remove_tree(path);
+}
+
 /* tar -czf OUT -C DIR NAME */
 static int run_tar(const char *out, const char *dir, const char *name) {
   int status, devnull;
@@ -395,7 +413,7 @@ static int compact_generations(const char *current) {
       again = 0;
       break;
     }
-    remove_tree(from);
+    discard(from);
     say(0, "packed log generation %s of this boot into %s", de->d_name, out);
   }
   closedir(d);
@@ -440,7 +458,7 @@ static void archive_old_boots(const char *current) {
       say(1, "could not archive %s (is tar installed?); left in place", from);
       continue;
     }
-    remove_tree(from);
+    discard(from);
     say(0, "archived the logs of boot %s to %s", name, out);
   }
   closedir(d);
@@ -591,8 +609,11 @@ static void free_disk(const char *current, long limit) {
         first, limit);
 }
 
-/* Remove what a crashed or killed run left half-written. */
-static void remove_partials(const char *dir) {
+/*
+ * Remove what a crashed or killed run left behind: half-written tarballs
+ * and half-removed directories that had already been packed.
+ */
+static void remove_leftovers(const char *dir) {
   char path[PATH_BUF + 600];
   struct dirent *de;
   DIR *d = opendir(dir);
@@ -605,6 +626,9 @@ static void remove_partials(const char *dir) {
     if (len > 8 && strcmp(de->d_name + len - 8, ".partial") == 0) {
       snprintf(path, sizeof path, "%s/%s", dir, de->d_name);
       unlink(path);
+    } else if (len > 9 && strcmp(de->d_name + len - 9, ".removing") == 0) {
+      snprintf(path, sizeof path, "%s/%s", dir, de->d_name);
+      remove_tree(path);
     }
   }
   closedir(d);
@@ -807,10 +831,11 @@ int main(int argc, char **argv) {
   }
 
   current_boot(logdir, boot, sizeof boot);
+  remove_leftovers(logdir);
   snprintf(tmp, sizeof tmp, "%s/archive", logdir);
-  remove_partials(tmp);
+  remove_leftovers(tmp);
   snprintf(tmp, sizeof tmp, "%s/%s", logdir, boot);
-  remove_partials(tmp);
+  remove_leftovers(tmp);
   archive_old_boots(boot);
   check_disk(boot, disk_pct, 0);
   again = compact_generations(boot);
