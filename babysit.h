@@ -42,7 +42,7 @@
  * Feature-test macros. The BSDs and macOS expose everything used here by
  * default; elsewhere POSIX.1-2008 + XSI is requested explicitly.
  */
-#if defined(__APPLE__)
+#ifdef __APPLE__
 #ifndef _DARWIN_C_SOURCE
 /* NOLINTNEXTLINE(bugprone-reserved-identifier,cert-dcl37-c,cert-dcl51-cpp) */
 #define _DARWIN_C_SOURCE 1

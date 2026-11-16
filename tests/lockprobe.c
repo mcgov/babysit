@@ -26,7 +26,7 @@ int main(int argc, char **argv) {
 
     if (fd < 0 || lock_byte(fd, LOCK_WRITER, F_WRLCK) < 0)
       return 2;
-    sleep((unsigned)atoi(argv[2]));
+    sleep((unsigned)strtoul(argv[2], NULL, 10));
     return 0;
   }
   if (argc < 2) {
