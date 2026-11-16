@@ -459,6 +459,22 @@ To outlive those, start
 .B babysit
 from something that puts it in a group of its own, such as
 .BR "systemd\-run \-\-user \-\-scope" .
+.SS "The command has no terminal"
+Its stdin is
+.IR /dev/null ,
+its stdout and stderr are pipes, and it has no controlling terminal.
+Programs notice: many drop colours and progress bars, and anything that
+needs to ask a question or read a password fails or gives up.
+.B babysit
+is for commands that run unattended.
+.PP
+Stdout and stderr arrive on separate pipes.
+Each stream's lines are logged in order, but when both are written at
+nearly the same moment, the order of an
+.B OUT:
+line relative to an
+.B ERR:
+line is not certain.
 .SH EXAMPLES
 Start a server and return once it is listening:
 .PP
