@@ -82,11 +82,11 @@ static void usage(FILE *f) {
       "\n"
       "Run COMMAND detached from this terminal/pipe, echo its output, and log "
       "it\n"
-      "to LOGDIR/<boot time>/<gen>/<babysit pid>/<command pid>/log, so the pid "
+      "to LOGDIR/<boot time>/<gen>/<babysit pid>/<child pid>/log, so the pid "
       "of\n"
-      "this babysit is enough to find the command's pid and log later (the "
-      "path\n"
-      "is also printed as the first line of output). Each output line is\n"
+      "this babysit is enough to find the command's pid and log later: see\n"
+      "--get-child-pid and --get-child-log (the path is also printed as the\n"
+      "first line of output). Each output line is\n"
       "prefixed with 'OUT: ' (stdout) or 'ERR: ' (stderr); the log starts "
       "with\n"
       "the command line and 'Process created with pid N' and ends with\n"
@@ -108,6 +108,13 @@ static void usage(FILE *f) {
       "  -d, --detach         return 0 as soon as the command has started\n"
       "  -l, --log-dir DIR    base log directory\n"
       "                       (default: $HOME/.local/var/log/babysit)\n"
+      "      --get-child-pid PID\n"
+      "                       run nothing: print the pid of the command "
+      "that the\n"
+      "                       babysit with pid PID started during this boot\n"
+      "      --get-child-log PID\n"
+      "                       run nothing: print the path of that command's "
+      "log\n"
       "  -V, --version        show the version\n"
       "  -h, --help           show this help\n"
       "\n"
@@ -123,7 +130,9 @@ static void usage(FILE *f) {
       "  124      --timeout expired; command still running\n"
       "  125      stalled for --idle seconds; command still running\n"
       "  126/127  the command could not be executed / was not found\n"
-      "  2        usage or internal error\n");
+      "  2        usage or internal error\n"
+      "With --get-child-pid or --get-child-log: 0 if found, 1 if PID has no "
+      "log.\n");
 }
 
 /* ---------- helpers ---------- */
@@ -607,6 +616,52 @@ static char *join_cmdline(char **cmd) {
   return buf;
 }
 
+/*
+ * --get-child-pid / --get-child-log: find what the babysit with pid PPID
+ * filed during this boot and print the command's pid or the path of its
+ * log. Generations are searched newest first, so if that pid has come
+ * round again the most recent run wins. Packed generations and
+ * earlier boots are not searched.
+ */
+static int lookup(const char *base, const char *ppid, int want_log) {
+  char path[PATH_BUF + 512];
+  struct dirent *de;
+  struct stat sb;
+  long gen;
+  DIR *d;
+  int n;
+
+  if (!is_pid_name(ppid)) {
+    fprintf(stderr, "babysit: '%s' is not a pid\n", ppid);
+    return EXIT_USAGE;
+  }
+  for (gen = current_gen(base); gen >= 0; gen--) {
+    n = snprintf(path, sizeof path, "%s/%ld/%s", base, gen, ppid);
+    if (n < 0 || (size_t)n >= sizeof path)
+      continue;
+    d = opendir(path);
+    if (!d)
+      continue;
+    while ((de = readdir(d)) != NULL) {
+      if (!is_pid_name(de->d_name))
+        continue;
+      n = snprintf(path, sizeof path, "%s/%ld/%s/%s/log", base, gen, ppid,
+                   de->d_name);
+      if (n < 0 || (size_t)n >= sizeof path || stat(path, &sb) < 0)
+        continue;
+      puts(want_log ? path : de->d_name);
+      closedir(d);
+      return 0;
+    }
+    closedir(d);
+  }
+  fprintf(stderr,
+          "babysit: no log for babysit pid %s under %s (nothing was "
+          "started, or babysitd has packed it)\n",
+          ppid, base);
+  return 1;
+}
+
 static int read_msg(int fd, struct msg *m) {
   char *p = (char *)m;
   size_t got = 0;
@@ -624,6 +679,7 @@ static int read_msg(int fd, struct msg *m) {
 
 int main(int argc, char **argv) {
   const char *idle_s = NULL, *timeout_s = NULL, *dir = NULL, *v;
+  const char *get_pid = NULL, *get_log = NULL;
   char logdir[PATH_BUF], cwd[PATH_BUF], boot[BOOT_STAMP_MAX];
   char base[PATH_BUF + 64];
   char *cmdline, **cmd;
@@ -647,6 +703,12 @@ int main(int argc, char **argv) {
       timeout_s = v;
     } else if (opt_match("babysit", argc, argv, &i, "-l", "--log-dir", &v)) {
       dir = v;
+    } else if (opt_match("babysit", argc, argv, &i, "--get-child-pid",
+                         "--get-child-pid", &v)) {
+      get_pid = v;
+    } else if (opt_match("babysit", argc, argv, &i, "--get-child-log",
+                         "--get-child-log", &v)) {
+      get_log = v;
     } else if (opt_match("babysit", argc, argv, &i, "-F", "--fixed", NULL)) {
       fixed = 1;
     } else if (opt_match("babysit", argc, argv, &i, "-d", "--detach", NULL)) {
@@ -664,7 +726,12 @@ int main(int argc, char **argv) {
     }
   }
   cmd = argv + i;
-  if (!*cmd) {
+  if ((get_pid || get_log) && *cmd) {
+    fprintf(stderr, "babysit: --get-child-pid and --get-child-log take no "
+                    "command\n");
+    return EXIT_USAGE;
+  }
+  if (!get_pid && !get_log && !*cmd) {
     fprintf(stderr, "babysit: no command given\n\n");
     usage(stderr);
     return EXIT_USAGE;
@@ -711,6 +778,13 @@ int main(int argc, char **argv) {
 
   current_boot(logdir, boot, sizeof boot);
   snprintf(base, sizeof base, "%s/%s", logdir, boot);
+  if (get_pid || get_log) {
+    int rc = get_pid ? lookup(base, get_pid, 0) : 0;
+
+    if (rc == 0 && get_log)
+      rc = lookup(base, get_log, 1);
+    return rc;
+  }
   cmdline = join_cmdline(cmd);
   if (!cmdline) {
     perror("babysit: malloc");

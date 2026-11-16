@@ -82,6 +82,22 @@ Base log directory.
 The default is
 .IR $HOME/.local/var/log/babysit .
 .TP
+.BI "\-\-get\-child\-pid " PID
+Run nothing.
+Print the pid of the command started during this boot by the
+.B babysit
+whose pid was
+.IR PID ;
+see
+.BR "FINDING THE COMMAND AGAIN" .
+.TP
+.BI "\-\-get\-child\-log " PID
+Run nothing.
+Print the path of that command's log.
+.TP
+.B \-V, \-\-version
+Show the version.
+.TP
 .B \-h, \-\-help
 Show a summary of options.
 .PP
@@ -96,7 +112,7 @@ suffix (0.5, 30s, 2m).
 Each command is logged to
 .PP
 .RS
-.IR LOGDIR / boot-time / generation / babysit-pid / command-pid /log
+.IR LOGDIR / boot-time / generation / babysit-pid / child-pid /log
 .RE
 .PP
 where
@@ -110,19 +126,12 @@ is a number that is 0 unless pids have been reused during this boot (see
 is the pid of the
 .B babysit
 that was invoked and
-.I command-pid
+.I child-pid
 is the pid of the command.
-A caller that remembers the pid of the
-.B babysit
-it started can therefore find the command again:
-.PP
-.RS
-.nf
-ls   $LOGDIR/*/*/$babysit_pid/          # the command's pid
-cat  $LOGDIR/*/*/$babysit_pid/*/log     # its output so far
-kill \-\- \-$(ls $LOGDIR/*/*/$babysit_pid)  # stop it and its children
-.fi
-.RE
+The first is the one the caller already has, as
+.B $!
+in a shell, and it is enough to find the second; see
+.BR "FINDING THE COMMAND AGAIN" .
 .PP
 The full path is also printed as the first line of output
 .RB ( "Log file: ..." ).
@@ -160,6 +169,53 @@ once the command is gone.
 Output that does not end in a newline, such as a prompt, is logged as a line
 of its own after one second, or at once when an idle stall is reported.
 Lines longer than 4096 bytes are split.
+.SH FINDING THE COMMAND AGAIN
+A caller that remembers the pid of the
+.B babysit
+it started can ask for the command's pid and its log:
+.PP
+.RS
+.nf
+babysit \-\-expect 'Listening on' \-\-idle 30s \-\- ./server &
+ppid=$!
+wait "$ppid"; rc=$?
+
+bbid=$(babysit \-\-get\-child\-pid "$ppid")
+log=$(babysit \-\-get\-child\-log "$ppid")
+.fi
+.RE
+.PP
+Both look only at the current boot and search its generations newest first,
+so if that pid has been reused the most recent run is the one reported.
+Give the same
+.B \-\-log\-dir
+as the run did, if it had one.
+They print one line and exit 0, or print nothing and exit 1 if that pid has
+no log: because nothing was started (exit status 2, 126 or 127), or because
+.BR babysitd (8)
+has since packed or expired it.
+.PP
+The log is created by the babysitter just before the command is executed,
+so a lookup made straight after starting
+.B babysit
+in the background can be too early.
+Once
+.B babysit
+has returned, or has printed its first line, the log is there.
+.PP
+The pid printed says which process the command
+.I was.
+It does not say the command is still running, and once it has exited the
+number can be given to an unrelated process.
+Before sending a signal, check that the log does not yet end in
+.B "Process exited"
+or
+.BR "Process killed" .
+To stop the command together with its children:
+.PP
+.RS
+kill \-\- \-"$bbid"
+.RE
 .SH PID REUSE
 Log paths are built from pids, and pids are reused.
 After a reboot numbering starts again, which is why each boot logs to its own
@@ -181,7 +237,7 @@ exists, meaning an earlier
 .B babysit
 had the same pid; or
 .IP \(bu 2
-.IR generation /*/ command-pid
+.IR generation /*/ child-pid
 exists, meaning an earlier command had the same pid.
 .PP
 If neither exists the log is created there.
@@ -253,6 +309,12 @@ No log is left behind.
 Usage or internal error.
 Nothing was started.
 .PP
+With
+.B \-\-get\-child\-pid
+or
+.BR \-\-get\-child\-log :
+0 if the log was found, 1 if not.
+.PP
 The reason for returning is also printed on stderr.
 A command that itself exits with one of the special statuses cannot be told
 apart by status alone; the last line of the log settles it.
@@ -278,6 +340,19 @@ Run a build, but come back if it goes quiet for two minutes:
 .RS
 babysit \-\-idle 2m \-\- make \-j8
 .RE
+.SH \&
+We are aware that
+.B babysitter
+and
+.B baby
+is a bad metaphor.
+We are aware that the babysitter is the parent process, and we are aware
+that our docs refer to 'babysitter' and 'child' even though it could have
+more internally consistent to use 'babysitter' and 'baby'.
+We like it more the way it is.
+We will
+.I never
+change the documentation or example code.
 .SH SEE ALSO
 .BR babysitd (8),
 .BR babysit.conf (5),
