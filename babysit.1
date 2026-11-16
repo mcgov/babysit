@@ -319,7 +319,11 @@ No log is left behind.
 .TP
 .B 2
 Usage or internal error.
-Nothing was started.
+Nothing was started, with one exception: if
+.B babysit
+loses contact with the babysitter after the command has started, it says so
+on stderr and returns 2 although the command may still be running (see
+.BR CAVEATS ).
 .PP
 With
 .B \-\-get\-child\-pid

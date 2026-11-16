@@ -131,7 +131,9 @@ static void usage(FILE *f) {
       "  124      --timeout expired; command still running\n"
       "  125      stalled for --idle seconds; command still running\n"
       "  126/127  the command could not be executed / was not found\n"
-      "  2        usage or internal error\n"
+      "  2        usage or internal error; nothing was started, unless "
+      "stderr\n"
+      "           says that contact with the babysitter was lost\n"
       "With --get-child-pid or --get-child-log: 0 if found, 1 if PID has no "
       "log.\n");
 }
