@@ -475,6 +475,15 @@ nearly the same moment, the order of an
 line relative to an
 .B ERR:
 line is not certain.
+.SS "Logs can hold secrets"
+A log starts with the full command line, arguments included, and records
+everything the command prints.
+The log directory and the logs are created with the caller's umask, which
+on many systems leaves them readable by other users.
+Keep passwords and tokens out of arguments, and set a stricter umask or
+restrict
+.I LOGDIR
+if what is logged should stay private.
 .SH EXAMPLES
 Start a server and return once it is listening:
 .PP
