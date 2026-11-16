@@ -32,10 +32,10 @@ XDG_CONFIG_HOME="$work/xdg" HOME="$work/dhome" "$bsd" --once 2>"$work/d5"
 has "config: \$XDG_CONFIG_HOME is used first" "$work/d5" "unknown key 'from_xdg'"
 env -u XDG_CONFIG_HOME HOME="$work/dhome" "$bsd" --once 2>"$work/d6"
 has "config: ~/.config is the fallback" "$work/d6" "unknown key 'from_home'"
-check "babysitd: default log dir is under HOME" "$([ -e "$work/dhome/.local/var/log/babysit/.boot" ] && echo y)" y
+check "babysitd: default log dir is under HOME" "$([ -e "$work/dhome/.local/var/log/babysit/.lock" ] && echo y)" y
 env -u XDG_CONFIG_HOME HOME="$work/dhome2" "$bsd" --once 2>/dev/null
 check "babysitd: a missing default config is fine" $? 0
 (cd "$work" && "$bsd" --once --log-dir reld --config /dev/null 2>/dev/null)
-check "babysitd: relative --log-dir is resolved against the cwd" "$([ -e "$work/reld/.boot" ] && echo y)" y
+check "babysitd: relative --log-dir is resolved against the cwd" "$([ -e "$work/reld/.lock" ] && echo y)" y
 
 finish

@@ -5,8 +5,9 @@
 #
 # Goal:
 #   A command that does not exist gives 127, one that is not executable
-#   gives 126, neither leaves a log behind, and a command killed by a signal
-#   gives 128 plus the signal number.
+#   gives 126, and a command killed by a signal gives 128 plus the signal
+#   number. A command that could not be executed still gets an instance:
+#   its identifier is printed, and its log and exit_code say what happened.
 #
 # Procedure:
 #   1. Run a path that does not exist.
@@ -15,22 +16,25 @@
 #
 # Fails if:
 #   - the statuses are not 127, 126 and 137.
-#   - a log file mentioning the non-executable command exists afterwards.
-#   - the failed runs leave directories behind: only the command that did
-#     run may have one.
+#   - no identifier is printed for a command that could not be executed.
+#   - its exit_code file does not hold the same status, or its log does not
+#     say that it could not be executed.
 
 # shellcheck source=tests/lib.sh
 . "$(dirname "$0")/../lib.sh"
 
-"$bs" --log-dir "$work/f" -- /no/such/program >/dev/null 2>&1
+"$bs" start --log-dir "$work/f" -- /no/such/program >"$work/m1" 2>"$work/m1e"
 check "missing command exits 127" $? 127
-"$bs" --log-dir "$work/f" -- sh -c 'kill -9 $$' >/dev/null 2>&1
+has "the identifier is printed all the same" "$work/m1" '^[0-9]\{8\}/[0-9][0-9]/[0-9][0-9]/....$'
+has "the error names the instance" "$work/m1e" "$(cat "$work/m1"): cannot execute"
+check "exit_code records 127" "$(cat "$work/f/$(cat "$work/m1")/exit_code")" 127
+has "the log says why" "$work/f/$(cat "$work/m1")/log" '^babysit: cannot execute: '
+"$bs" start --log-dir "$work/f" -- sh -c 'kill -9 $$' >"$work/m2" 2>/dev/null
 check "signal death is 128+sig" $? 137
+check "exit_code records it the same way" "$(cat "$work/f/$(cat "$work/m2")/exit_code")" 137
 : >"$work/noexec"
-"$bs" --log-dir "$work/f" -- "$work/noexec" >/dev/null 2>&1
+"$bs" start --log-dir "$work/f" -- "$work/noexec" >"$work/m3" 2>/dev/null
 check "non-executable command exits 126" $? 126
-check "failed exec leaves no log" "$(find "$work/f" -name log -exec grep -l noexec {} + | count)" 0
-check "failed exec leaves no directories either" \
-    "$(find "$work/f/$stamp/0" -mindepth 1 -maxdepth 1 -type d | count)" 1
+check "exit_code records 126" "$(cat "$work/f/$(cat "$work/m3")/exit_code")" 126
 
 finish

@@ -4,30 +4,39 @@
 # Test: babysitd leaves a log that is being written alone
 #
 # Goal:
-#   A generation or log with an active writer is neither packed nor expired,
-#   however old it looks.
+#   A day directory is not archived, and a log in it not expired, for as
+#   long as a log there has a writer, however old it all looks.
 #
 # Procedure:
-#   1. Start a 3-second command with --detach.
-#   2. Create a newer generation directory and backdate the old one, so it
-#      qualifies for packing.
-#   3. Run babysitd once; backdate everything in the old generation by 10
-#      days and run babysitd again with a 1-day age limit.
-#   4. Probe the log.
+#   1. Lay out a past day with two instances and have a helper hold the
+#      writer lock on one of the logs, as a babysitter would.
+#   2. Make everything look ten days old and run "babysitd --once" with a
+#      one-day age limit.
+#   3. Let the lock go and run it again.
 #
 # Fails if:
-#   - the log is no longer there and locked, which means babysitd packed or
-#     deleted a log in use.
+#   - the day is archived, or the locked log deleted, while the lock is
+#     held.
+#   - the finished log next to it is not expired in the meantime.
+#   - the day is not archived once the lock is gone.
 
 # shellcheck source=tests/lib.sh
 . "$(dirname "$0")/../lib.sh"
 
-"$bs" --log-dir "$work/lk2" --detach -- sleep 3 >"$work/l4" 2>/dev/null
-mkdir "$work/lk2/$stamp/1"; touch -t "$old1m" "$work/lk2/$stamp/0"
-"$bsd" --once --log-dir "$work/lk2" --max-age-days 1 --config /dev/null 2>/dev/null
-find "$work/lk2/$stamp/0" -exec touch -t "$old10d" {} + 2>/dev/null
-"$bsd" --once --log-dir "$work/lk2" --max-age-days 1 --config /dev/null 2>/dev/null
-check "lock: a locked log is neither packed nor expired" "$("$lp" "$(logof "$work/l4")")" locked
-sleep 3.5
+d="$work/lk2"
+plant "$d" 20230101/03/04/aaaa live
+plant "$d" 20230101/03/05/bbbb finished
+"$lp" --hold 3 "$d/20230101/03/04/aaaa/log" &
+sleep 0.5
+find "$d/20230101" -exec touch -t "$old10d" {} +
+"$bsd" --once --log-dir "$d" --max-age-days 1 --config /dev/null -u 0 2>"$work/lk2.err"
+check "a day with a writer is not archived" "$([ -e "$d/archive" ] && echo archived || echo no)" no
+check "the log being written is not expired" "$(cat "$d/20230101/03/04/aaaa/log")" live
+check "the finished log beside it is" "$([ -e "$d/20230101/03/05/bbbb" ] && echo present || echo gone)" gone
+wait
+settle "$d/20230101"
+"$bsd" --once --log-dir "$d" --config /dev/null -u 0 2>>"$work/lk2.err"
+check "once the writer is gone the day is archived" \
+    "$(ls "$d/archive" | tr '\n' ' '; [ -e "$d/20230101" ] || echo removed)" "babysit_logs_20230101.tar.gz removed"
 
 finish

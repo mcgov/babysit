@@ -8,70 +8,69 @@
 /*
  * babysitd - housekeeping for babysit's log directory.
  *
- *   1. babysit files logs under <log-dir>/<boot timestamp>/. Any such
- *      directory that is not the current boot's is packed into
- *      <log-dir>/archive/babysit_logs_<boot timestamp>.tar.gz and removed.
- *      This is done whenever one is found (on start and at every wake-up), so
- * it does not matter when after a reboot the service first runs.
- *   2. Within the current boot, babysit starts a new generation directory
- *      (<boot>/<N+1>/) whenever a pid comes round again. Every generation
- *      but the newest is packed into <boot>/<N>.tar.gz as soon as nothing
- *      is writing to it any more.
- *   3. Archives, and finished logs of the current boot, older than
- *      max_age_days are deleted.
- *   4. When the filesystem holding the logs is at least
- *      compact_at_disk_percent full, it starts a new generation itself, so
- *      that the logs written so far can be packed (step 2) before the disk
- *      runs out.
- *   5. When that filesystem is at least delete_at_disk_percent full (off by
+ * babysit files each instance's log under
+ * <log-dir>/<YYYYmmdd>/<HH>/<MM>/<salt>/log (see babysit.h). At every
+ * pass, babysitd does this:
+ *
+ *   1. Every day directory before today's in which nothing is being
+ *      written any more is packed into
+ *      <log-dir>/archive/babysit_logs_<YYYYmmdd>.tar.gz and removed. So is
+ *      anything dated later than now, which is there because the clock was
+ *      set back: later days go to the archive, later hours of today and
+ *      later minutes of this hour are packed in place. babysit refuses to
+ *      start anything (exit status 75) while such records are in the way.
+ *   2. When the filesystem holding the logs is at least
+ *      compact_at_disk_percent full, it does the same one level down for
+ *      the days that are still there (today, and earlier days that still
+ *      have a writer): every hour that is over and has no writer is packed
+ *      into <YYYYmmdd>/<HH>.tar.gz.
+ *   3. Archives and packed hours, and finished logs still lying in a day
+ *      directory, older than max_age_days are deleted.
+ *   4. When that filesystem is at least delete_at_disk_percent full (off by
  *      default), it deletes packed logs, oldest first, until enough has
- *      gone to bring usage back under the limit or none are left. Only tarballs
- * are deleted: never a live log directory.
- *   6. It watches the kernel's last-allocated pid and warns when it wraps
- *      around: from then on pids of this boot can be reused. babysit itself
- *      deals with an actual collision (see babysit(1), PID REUSE).
+ *      gone to bring usage back under the limit or none are left. Only
+ *      tarballs are deleted: never a live log directory.
  *
  * It does not poll. It sleeps for check_interval (6 hours by default) and
  * does all of the above when it wakes. Writing anything to the FIFO
- * <log-dir>/.request wakes it early for the same full pass; babysit does
- * that whenever it starts a new generation, and tests can too. Only
- * while a superseded generation is waiting for its last writer does it look
- * again every 30 seconds.
+ * <log-dir>/.request wakes it early for the same pass.
  *
- * Logs that still have a writer are never archived or deleted.
+ * Logs that still have a writer are never archived or deleted, and neither
+ * is anything created in the last couple of seconds: a babysit that has
+ * made its directory but not yet locked its log must not find it gone.
+ *
+ * "Today" and "this hour" are reckoned in local time, or in UTC if the
+ * configuration says timezone = utc; babysit names its directories by the
+ * same setting.
  *
  * Packing is done so that a failure at any point loses nothing: the tarball
- * is written under a .partial name and renamed into place, and only then is
- * the directory removed. If it fails (for instance because the disk is
- * already full) the partial file is removed, the directory stays, and the
- * attempt is not repeated for a while. The directory is removed by first
- * renaming it to <name>.removing, so that a run killed part-way never
- * leaves a half-empty directory under its real name to be packed again
- * over the complete tarball. Leftover .partial files and .removing
- * directories from a crashed run are removed on start.
+ * is written under a .partial name, flushed to disk and renamed into place,
+ * and only then is the directory removed. If it fails (for instance because
+ * the disk is already full) the partial file is removed, the directory
+ * stays, and the attempt is not repeated for a while. The directory is
+ * removed by first renaming it to <name>.removing, so that a run killed
+ * part-way never leaves a half-empty directory under its real name to be
+ * packed again. Leftover .partial files and .removing directories from a
+ * crashed run are removed on start.
  *
  * Only one babysitd works on a log directory at a time. Each pass is done
  * holding a write lock on <log-dir>/.lock, so a second instance (a
  * "babysitd --once" run by hand or from cron next to the service, say)
  * waits for the first to finish instead of packing the same directory.
  *
- * The last pid comes from a Linux /proc file or FreeBSD's kern.lastpid;
- * where neither exists the rollover watch is switched off and the rest
- * still works. Archives are made by running tar(1).
+ * Archives are made by running tar(1).
  */
 #include "babysit.h"
 #include <stdarg.h>
 #include <sys/statvfs.h>
 
-#define LAST_PID_FILE "/proc/sys/kernel/ns_last_pid"
-#define PENDING_RECHECK_S 30 /* while a generation waits for its writers */
-#define GEN_GRACE_S 2        /* a generation must be this quiet to be packed */
-#define DISK_EVERY_S 600 /* at most one disk-triggered generation per this */
+#define QUIET_S 2        /* untouched for this long before it may be packed */
 #define RETRY_PACK_S 600 /* after a failed pack, leave it alone this long */
 
 static const char *prog = "babysitd";
 static char logdir[PATH_BUF];
 static int journal; /* stderr goes to the systemd journal */
+static int use_utc; /* timezone = utc: days and hours are UTC ones */
 
 static volatile sig_atomic_t stop; /* SIGTERM or SIGINT: finish and exit */
 static int wake_fd = -1;           /* our write end of the request FIFO */
@@ -150,10 +149,10 @@ static void usage(FILE *f) {
   fprintf(
       f, "Usage: babysitd [options]\n"
          "\n"
-         "Housekeeping for babysit logs: pack the logs of previous boots into\n"
-         "LOGDIR/archive/babysit_logs_<boot time>.tar.gz, delete old logs, and "
-         "warn\n"
-         "when the system's pids wrap around.\n"
+         "Housekeeping for babysit logs: pack the logs of past days into\n"
+         "LOGDIR/archive/babysit_logs_<YYYYmmdd>.tar.gz, pack sooner when the "
+         "disk\n"
+         "fills up, and delete old logs.\n"
          "\n"
          "Options:\n"
          "  -l, --log-dir DIR        log directory to look after\n"
@@ -173,25 +172,23 @@ static void usage(FILE *f) {
          "  -u, --compact-at-disk-percent N\n"
          "                           when the log filesystem is N%% full or "
          "more,\n"
-         "                           start a new log generation so the current "
-         "one\n"
-         "                           can be packed; 0 disables (default: 90)\n"
+         "                           also pack the finished hours of days that "
+         "are\n"
+         "                           not over yet; 0 disables (default: 90)\n"
          "  -D, --delete-at-disk-percent N\n"
          "                           when the log filesystem is N%% full or "
          "more,\n"
          "                           delete packed logs, oldest first, until "
          "it is\n"
          "                           not; 0 disables (default: 0)\n"
-         "      --last-pid-file F    file holding the last allocated pid\n"
-         "                           (default: " LAST_PID_FILE ")\n"
-         "  -1, --once               archive and clean once, then exit\n"
+         "  -1, --once               do the housekeeping once, then exit\n"
          "  -V, --version            show the version\n"
          "  -h, --help               show this help\n"
          "\n"
          "Options given on the command line override the configuration file, "
          "which\n"
          "holds 'key = value' lines: max_age_days, check_interval,\n"
-         "compact_at_disk_percent, delete_at_disk_percent.\n");
+         "compact_at_disk_percent, delete_at_disk_percent, timezone.\n");
 }
 
 static void say(int warning, const char *fmt, ...) {
@@ -208,8 +205,8 @@ static void say(int warning, const char *fmt, ...) {
 }
 
 /*
- * The request FIFO. babysit writes a byte to it when it starts a new
- * generation. Holding a write end ourselves keeps the read end from
+ * The request FIFO: a byte written to it asks for a pass now. Holding a
+ * write end ourselves keeps the read end from
  * reporting hang-up, and lets the signal handler wake poll().
  *
  * Called at the start of every pass: if the FIFO has been removed along
@@ -245,8 +242,8 @@ static void open_request_fifo(void) {
   if (r < 0 || w < 0) {
     if (!warned)
       say(1,
-          "%s is not usable; babysit cannot ask for early packing, "
-          "which will wait for the next scheduled check",
+          "%s is not usable; a pass cannot be asked for early and "
+          "will wait for the next scheduled check",
           path);
     warned = 1;
     if (r >= 0)
@@ -338,26 +335,23 @@ static void load_config(const char *path, int required, long *max_age,
     return;
   }
   while (fgets(line, sizeof line, f)) {
-    char *key = line, *val, *end;
+    char *key, *val;
     long v;
+    int kind;
 
     lineno++;
-    while (*key == ' ' || *key == '\t')
-      key++;
-    if (*key == '#' || *key == '\n' || *key == '\0')
+    kind = config_split(line, &key, &val);
+    if (kind == 0)
       continue;
-    val = strchr(key, '=');
-    if (!val) {
+    if (kind < 0) {
       say(1, "%s:%d: expected 'key = value'", path, lineno);
       continue;
     }
-    end = val;
-    while (end > key && (end[-1] == ' ' || end[-1] == '\t'))
-      end--;
-    *end = '\0';
-    val++;
-    while (*val == ' ' || *val == '\t')
-      val++;
+    if (strcmp(key, "timezone") == 0) {
+      if (parse_timezone(val, &use_utc) < 0)
+        say(1, "%s:%d: timezone must be local or utc", path, lineno);
+      continue;
+    }
     if (strcmp(key, "check_interval") == 0) {
       if (parse_duration(val, &v) < 0)
         say(1, "%s:%d: expected a duration such as 6h or 30m", path, lineno);
@@ -383,49 +377,6 @@ static void load_config(const char *path, int required, long *max_age,
       *delete_pct = v;
   }
   fclose(f);
-}
-
-/*
- * The most recently allocated pid: from FILE if it can be read (Linux's
- * ns_last_pid, or whatever --last-pid-file names), else from the kernel on
- * FreeBSD. Returns -1 where there is no way to tell.
- */
-static int read_last_pid(const char *file, long *out) {
-  char buf[64];
-
-  if (read_first_line(file, buf, sizeof buf) == 0 && parse_num(buf, out) == 0)
-    return 0;
-#ifdef __FreeBSD__
-  {
-    int pid;
-    size_t len = sizeof pid;
-
-    if (sysctlbyname("kern.lastpid", &pid, &len, NULL, 0) == 0) {
-      *out = pid;
-      return 0;
-    }
-  }
-#endif
-  return -1;
-}
-
-/* 1 if any log in any generation under <log-dir>/<boot> has a writer. */
-static int boot_dir_has_writer(const char *bootdir) {
-  char path[PATH_BUF + 600];
-  struct dirent *de;
-  DIR *d = opendir(bootdir);
-  int busy = 0;
-
-  if (!d)
-    return !is_absent(errno);
-  while (!busy && (de = readdir(d)) != NULL) {
-    if (!is_pid_name(de->d_name))
-      continue;
-    snprintf(path, sizeof path, "%s/%s", bootdir, de->d_name);
-    busy = gen_dir_has_writer(path);
-  }
-  closedir(d);
-  return busy;
 }
 
 /*
@@ -508,115 +459,6 @@ static int pack(const char *tmp, const char *out, const char *home,
   return 0;
 }
 
-/*
- * Pack every generation of the current boot except the newest, once it has
- * no writer left. babysit only ever adds logs to the newest generation, so
- * an older one can only become quieter. The grace period covers a babysit
- * that picked a generation just before a newer one appeared.
- */
-static time_t pack_retry_at;
-
-/* Returns how many seconds to wait before looking again, 0 if nothing is
- * waiting to be packed. */
-static int compact_generations(const char *current) {
-  char bootdir[PATH_BUF + 64], from[PATH_BUF + 400], out[PATH_BUF + 420],
-      tmp[PATH_BUF + 440];
-  struct dirent *de;
-  struct stat sb;
-  long newest_gen;
-  int again = 0;
-  DIR *d;
-
-  if (time(NULL) < pack_retry_at)
-    return 0;
-  snprintf(bootdir, sizeof bootdir, "%s/%s", logdir, current);
-  newest_gen = current_gen(bootdir);
-  if (newest_gen < 1)
-    return 0;
-  d = opendir(bootdir);
-  if (d == NULL)
-    return 0;
-  while ((de = readdir(d)) != NULL) {
-    if (!is_pid_name(de->d_name) || strtol(de->d_name, NULL, 10) >= newest_gen)
-      continue;
-    snprintf(from, sizeof from, "%s/%s", bootdir, de->d_name);
-    if (stat(from, &sb) < 0 || !S_ISDIR(sb.st_mode))
-      continue;
-    if (sb.st_mtime + GEN_GRACE_S > time(NULL)) {
-      again = GEN_GRACE_S + 1;
-      continue;
-    }
-    if (gen_dir_has_writer(from)) {
-      if (again == 0)
-        again = PENDING_RECHECK_S;
-      continue;
-    }
-    snprintf(out, sizeof out, "%s.tar.gz", from);
-    snprintf(tmp, sizeof tmp, "%s.partial", out);
-    if (pack(tmp, out, bootdir, bootdir, de->d_name) < 0) {
-      pack_retry_at = time(NULL) + RETRY_PACK_S;
-      say(1,
-          "could not pack %s (disk full, or tar missing?); it is "
-          "left in place and not retried for %d minutes",
-          from, RETRY_PACK_S / 60);
-      again = 0;
-      break;
-    }
-    discard(from);
-    say(0, "packed log generation %s of this boot into %s", de->d_name, out);
-  }
-  closedir(d);
-  return again;
-}
-
-/* Pack every boot directory other than the current one into the archive. */
-static void archive_old_boots(const char *current) {
-  char adir[PATH_BUF + 16], from[PATH_BUF + 300], out[PATH_BUF + 400],
-      tmp[PATH_BUF + 420];
-  struct dirent *de;
-  struct stat sb;
-  DIR *d = opendir(logdir);
-  int i;
-
-  if (!d)
-    return;
-  snprintf(adir, sizeof adir, "%s/archive", logdir);
-  while ((de = readdir(d)) != NULL) {
-    const char *name = de->d_name;
-
-    /* Only what babysit itself names: the log directory may hold other
-     * things, and they are not ours to pack and remove. */
-    if (!is_boot_name(name) || strcmp(name, current) == 0)
-      continue;
-    snprintf(from, sizeof from, "%s/%s", logdir, name);
-    if (stat(from, &sb) < 0 || !S_ISDIR(sb.st_mode))
-      continue;
-    if (boot_dir_has_writer(from))
-      continue; /* cannot be from an earlier boot after all */
-    if (mkdirs(adir) < 0) {
-      say(1, "cannot create %s: %s", adir, strerror(errno));
-      break;
-    }
-    /* Never overwrite an archive that is already there. */
-    snprintf(out, sizeof out, "%s/babysit_logs_%s.tar.gz", adir, name);
-    for (i = 2; stat(out, &sb) == 0 && i < 100; i++)
-      snprintf(out, sizeof out, "%s/babysit_logs_%s.%d.tar.gz", adir, name, i);
-    if (stat(out, &sb) == 0) {
-      say(1, "every archive name for boot %s is taken; %s left in place", name,
-          from);
-      continue;
-    }
-    snprintf(tmp, sizeof tmp, "%s.partial", out);
-    if (pack(tmp, out, adir, logdir, name) < 0) {
-      say(1, "could not archive %s (is tar installed?); left in place", from);
-      continue;
-    }
-    discard(from);
-    say(0, "archived the logs of boot %s to %s", name, out);
-  }
-  closedir(d);
-}
-
 /* Newest modification time of anything in the tree. */
 static time_t newest;
 static int newest_cb(const char *path, const struct stat *sb, int flag,
@@ -643,47 +485,198 @@ static int disk_used_percent(void) {
   return (int)(((used * 100) + total - 1) / total);
 }
 
+/* Has anything under DIR been created or changed in the last QUIET_S? */
+static int recently_touched(const char *dir) {
+  newest = 0;
+  nftw(dir, newest_cb, 16, FTW_PHYS);
+  return newest + QUIET_S > time(NULL);
+}
+
 /*
- * If the disk is filling up, start a new generation so that the current
- * one can be packed as soon as its writers are done. Nothing is done if the
- * current generation is empty (there would be nothing to gain), and this is
- * rate limited: when the disk is full of other things, packing our logs
- * over and over would only add churn.
+ * Remove the empty directories under DIR, and DIR itself if that leaves it
+ * empty: instances whose command could not be executed, and logs that have
+ * expired, leave them behind. One made a moment ago is left alone, since it
+ * may be an instance that has not created its log yet.
  */
-static void check_disk(const char *current, long limit, int rate_limit) {
-  static time_t next_at;
-  char gendir[PATH_BUF + 128];
+static int prune_cb(const char *path, const struct stat *sb, int flag,
+                    struct FTW *ftw) {
+  (void)ftw;
+  if (flag == FTW_DP && sb->st_mtime + QUIET_S <= time(NULL))
+    rmdir(path); /* fails, harmlessly, on one that is not empty */
+  return 0;
+}
+
+static void prune_empty(const char *dir) {
+  nftw(dir, prune_cb, 16, FTW_DEPTH | FTW_PHYS);
+}
+
+/*
+ * Choose the tarball to pack into: STEM.tar.gz, or STEM.2.tar.gz and so on
+ * if that exists, so that nothing already packed is ever overwritten.
+ * Returns -1 if every name up to .99 is taken.
+ */
+static int free_tarball_name(char *out, size_t n, const char *stem) {
+  struct stat sb;
+  int i;
+
+  snprintf(out, n, "%s.tar.gz", stem);
+  for (i = 2; stat(out, &sb) == 0 && i < 100; i++)
+    snprintf(out, n, "%s.%d.tar.gz", stem, i);
+  return stat(out, &sb) == 0 ? -1 : 0;
+}
+
+/* May DIR be packed: is it a directory nobody is writing in or just made? */
+static int is_settled(const char *dir) {
+  struct stat sb;
+
+  if (recently_touched(dir))
+    return 0;
+  prune_empty(dir); /* after the look at the clock: this touches DIR too */
+  if (stat(dir, &sb) < 0 || !S_ISDIR(sb.st_mode))
+    return 0; /* gone: there was nothing in it */
+  return !tree_has_writer(dir);
+}
+
+/*
+ * Pack every day other than TODAY that is settled into the archive. Those
+ * are the days that are over, and also any dated after today: the clock
+ * has been set back since they were filed, and babysit starts nothing
+ * until they are out of the way.
+ */
+static void archive_days(const char *today) {
+  char adir[PATH_BUF + 16], from[PATH_BUF + 300], stem[PATH_BUF + 400],
+      out[PATH_BUF + 420], tmp[PATH_BUF + 440];
   struct dirent *de;
-  long gen;
-  int pct, has_logs = 0;
+  DIR *d = opendir(logdir);
+
+  if (!d)
+    return;
+  snprintf(adir, sizeof adir, "%s/archive", logdir);
+  while ((de = readdir(d)) != NULL) {
+    const char *name = de->d_name;
+
+    /* Only what babysit itself names: the log directory may hold other
+     * things, and they are not ours to pack and remove. */
+    if (!is_day_name(name) || strcmp(name, today) == 0)
+      continue;
+    snprintf(from, sizeof from, "%s/%s", logdir, name);
+    if (!is_settled(from))
+      continue;
+    if (mkdirs(adir) < 0) {
+      say(1, "cannot create %s: %s", adir, strerror(errno));
+      break;
+    }
+    snprintf(stem, sizeof stem, "%s/babysit_logs_%s", adir, name);
+    if (free_tarball_name(out, sizeof out, stem) < 0) {
+      say(1, "every archive name for %s is taken; %s left in place", name,
+          from);
+      continue;
+    }
+    snprintf(tmp, sizeof tmp, "%s.partial", out);
+    if (pack(tmp, out, adir, logdir, name) < 0) {
+      say(1, "could not archive %s (is tar installed?); left in place", from);
+      continue;
+    }
+    discard(from);
+    say(0, "archived the logs of %s to %s", name, out);
+  }
+  closedir(d);
+}
+
+/*
+ * Pack directories with two-digit names (hours in a day, minutes in an
+ * hour) in place, DIR/<nn> into DIR/<nn>.tar.gz: those sorting before REF
+ * if SIDE is negative, after it if positive, all of them if REF is NULL.
+ * WHY starts the message that reports each one.
+ */
+static time_t pack_retry_at;
+
+static void pack_children(const char *dir, const char *ref, int side,
+                          const char *why) {
+  char from[PATH_BUF + 600], out[PATH_BUF + 620], tmp[PATH_BUF + 640];
+  struct dirent *de;
+  DIR *d = opendir(dir);
+  int cmp;
+
+  if (!d)
+    return;
+  while ((de = readdir(d)) != NULL && time(NULL) >= pack_retry_at) {
+    if (!is_hour_name(de->d_name))
+      continue;
+    cmp = ref ? strcmp(de->d_name, ref) : side;
+    if (cmp == 0 || (cmp < 0) != (side < 0))
+      continue;
+    snprintf(from, sizeof from, "%s/%s", dir, de->d_name);
+    if (!is_settled(from))
+      continue;
+    if (free_tarball_name(out, sizeof out, from) < 0)
+      continue;
+    snprintf(tmp, sizeof tmp, "%s.partial", out);
+    if (pack(tmp, out, dir, dir, de->d_name) < 0) {
+      pack_retry_at = time(NULL) + RETRY_PACK_S;
+      say(1,
+          "could not pack %s (disk full, or tar missing?); it is "
+          "left in place and not retried for %d minutes",
+          from, RETRY_PACK_S / 60);
+      break;
+    }
+    discard(from);
+    say(1, "%s: packed %s into %s", why, from, out);
+  }
+  closedir(d);
+}
+
+/*
+ * When the disk is filling up, do not wait for a day to be over: pack each
+ * of its hours that is, in place, as <day>/<HH>.tar.gz. This reaches the
+ * days that archive_days() had to leave: today, and other days in which
+ * something is still being written.
+ */
+static void pack_finished_hours(const char *today, const char *hour,
+                                long limit) {
+  char dir[PATH_BUF + 300], why[96];
+  struct dirent *de;
+  int pct, cmp;
   DIR *d;
 
-  if (limit <= 0 || (rate_limit && time(NULL) < next_at))
+  if (limit <= 0)
     return;
   pct = disk_used_percent();
   if (pct < 0 || pct < limit)
     return;
-  snprintf(gendir, sizeof gendir, "%s/%s", logdir, current);
-  gen = current_gen(gendir);
-  if (gen < 0)
+  snprintf(why, sizeof why, "log filesystem is %d%% full (limit %ld%%)", pct,
+           limit);
+  d = opendir(logdir);
+  if (!d)
     return;
-  snprintf(gendir, sizeof gendir, "%s/%s/%ld", logdir, current, gen);
-  d = opendir(gendir);
-  if (d == NULL)
-    return;
-  while (!has_logs && (de = readdir(d)) != NULL)
-    has_logs = is_pid_name(de->d_name);
+  while ((de = readdir(d)) != NULL) {
+    if (!is_day_name(de->d_name))
+      continue;
+    cmp = strcmp(de->d_name, today);
+    snprintf(dir, sizeof dir, "%s/%s", logdir, de->d_name);
+    if (cmp < 0)
+      pack_children(dir, NULL, -1, why); /* all of its hours */
+    else if (cmp == 0)
+      pack_children(dir, hour, -1, why); /* those before now */
+  }
   closedir(d);
-  if (!has_logs)
-    return;
-  snprintf(gendir, sizeof gendir, "%s/%s/%ld", logdir, current, gen + 1);
-  if (mkdir(gendir, 0777) < 0)
-    return; /* no room even for a directory: leave everything be */
-  next_at = time(NULL) + DISK_EVERY_S;
-  say(1,
-      "log filesystem is %d%% full (limit %ld%%): started log "
-      "generation %ld so that generation %ld can be packed",
-      pct, limit, gen + 1, gen);
+}
+
+/*
+ * Pack what is dated later than now within today: the hours after this
+ * one, and the minutes after this one in this hour. Days after today are
+ * dealt with by archive_days(). After this, and once whatever is still
+ * being written there has finished, babysit will start commands again.
+ */
+static void pack_later(const char *today, const char *hour,
+                       const char *minute) {
+  static const char why[] = "the clock has gone backwards";
+  char dir[PATH_BUF + 300];
+
+  snprintf(dir, sizeof dir, "%s/%s", logdir, today);
+  pack_children(dir, hour, 1, why);
+  snprintf(dir, sizeof dir, "%s/%s/%s", logdir, today, hour);
+  pack_children(dir, minute, 1, why);
 }
 
 /* Remember PATH as the deletion candidate if it is the oldest tarball yet. */
@@ -739,11 +732,31 @@ static long long disk_excess(long limit, int *pct) {
   return (long long)((used - allowed) * vfs.f_frsize);
 }
 
+/* Every tarball of ours: the archives, and the packed hours in each day. */
+static void scan_all_tarballs(char *oldest, size_t n, time_t *oldest_time) {
+  char dir[PATH_BUF + 300];
+  struct dirent *de;
+  DIR *d;
+
+  snprintf(dir, sizeof dir, "%s/archive", logdir);
+  scan_tarballs(dir, is_archive_name, oldest, n, oldest_time);
+  d = opendir(logdir);
+  if (!d)
+    return;
+  while ((de = readdir(d)) != NULL) {
+    if (!is_day_name(de->d_name))
+      continue;
+    snprintf(dir, sizeof dir, "%s/%s", logdir, de->d_name);
+    scan_tarballs(dir, is_packed_hour_name, oldest, n, oldest_time);
+  }
+  closedir(d);
+}
+
 /*
  * Last resort when the disk is nearly full: delete packed logs, oldest
  * first, until enough has gone to bring usage back under the limit or
- * there are none left. The candidates are the archives of earlier boots
- * and the packed generations of this boot. Live log directories are never
+ * there are none left. The candidates are the archives of past days and
+ * the packed hours of days still in place. Live log directories are never
  * touched, so a command that is still running, or one nobody has had the
  * chance to pack yet, is safe.
  *
@@ -754,8 +767,8 @@ static long long disk_excess(long limit, int *pct) {
  * holds the file, and every packed log would be gone before the number
  * moved.
  */
-static void free_disk(const char *current, long limit) {
-  char dir[PATH_BUF + 64], oldest[PATH_BUF + 700];
+static void free_disk(long limit) {
+  char oldest[PATH_BUF + 700];
   long long need, freed = 0;
   time_t oldest_time;
   struct stat sb;
@@ -770,10 +783,7 @@ static void free_disk(const char *current, long limit) {
   while (freed < need) {
     oldest[0] = '\0';
     oldest_time = 0;
-    snprintf(dir, sizeof dir, "%s/archive", logdir);
-    scan_tarballs(dir, is_archive_name, oldest, sizeof oldest, &oldest_time);
-    snprintf(dir, sizeof dir, "%s/%s", logdir, current);
-    scan_tarballs(dir, is_packed_gen_name, oldest, sizeof oldest, &oldest_time);
+    scan_all_tarballs(oldest, sizeof oldest, &oldest_time);
     if (!oldest[0] || stat(oldest, &sb) < 0 || unlink(oldest) < 0)
       break;
     freed += (long long)sb.st_blocks * 512;
@@ -820,20 +830,40 @@ static void remove_leftovers(const char *dir) {
   closedir(d);
 }
 
-/* Delete the old finished logs of one live generation. */
-static long clean_generation(const char *gendir, time_t cutoff) {
-  char path[PATH_BUF + 800];
+static void remove_all_leftovers(void) {
+  char dir[PATH_BUF + 300];
   struct dirent *de;
-  DIR *d = opendir(gendir);
+  DIR *d;
+
+  remove_leftovers(logdir);
+  snprintf(dir, sizeof dir, "%s/archive", logdir);
+  remove_leftovers(dir);
+  d = opendir(logdir);
+  if (!d)
+    return;
+  while ((de = readdir(d)) != NULL) {
+    if (!is_day_name(de->d_name))
+      continue;
+    snprintf(dir, sizeof dir, "%s/%s", logdir, de->d_name);
+    remove_leftovers(dir);
+  }
+  closedir(d);
+}
+
+/* Delete the old finished instances in one minute directory. */
+static long clean_minute(const char *dir, time_t cutoff) {
+  char path[PATH_BUF + 900];
+  struct dirent *de;
+  DIR *d = opendir(dir);
   long removed = 0;
 
   if (!d)
     return 0;
   while ((de = readdir(d)) != NULL) {
-    if (!is_pid_name(de->d_name))
+    if (!is_salt_name(de->d_name))
       continue;
-    snprintf(path, sizeof path, "%s/%s", gendir, de->d_name);
-    if (ppid_dir_has_writer(path))
+    snprintf(path, sizeof path, "%s/%s", dir, de->d_name);
+    if (tree_has_writer(path))
       continue;
     newest = 0;
     nftw(path, newest_cb, 16, FTW_PHYS);
@@ -841,17 +871,41 @@ static long clean_generation(const char *gendir, time_t cutoff) {
       removed++;
   }
   closedir(d);
+  if (removed)
+    rmdir(dir); /* if that emptied it; fails, harmlessly, if not */
   return removed;
 }
 
-/* Delete old archives, and old finished logs of the current boot. */
-static void clean_old(long max_age_days, const char *current) {
-  char dir[PATH_BUF + 64], path[PATH_BUF + 400];
+/* The same for every minute of one hour directory. */
+static long clean_hour(const char *dir, time_t cutoff) {
+  char path[PATH_BUF + 800];
   struct dirent *de;
+  DIR *d = opendir(dir);
+  long removed = 0;
+
+  if (!d)
+    return 0;
+  while ((de = readdir(d)) != NULL) {
+    if (!is_hour_name(de->d_name)) /* a minute is two digits too */
+      continue;
+    snprintf(path, sizeof path, "%s/%s", dir, de->d_name);
+    removed += clean_minute(path, cutoff);
+  }
+  closedir(d);
+  if (removed)
+    rmdir(dir);
+  return removed;
+}
+
+/* Delete old archives and packed hours, and old finished logs that are
+ * still in a day directory because something else there is being written. */
+static void clean_old(long max_age_days) {
+  char dir[PATH_BUF + 300], path[PATH_BUF + 600];
+  struct dirent *de, *he;
   struct stat sb;
   time_t cutoff;
   long removed = 0;
-  DIR *d;
+  DIR *d, *h;
 
   if (max_age_days <= 0)
     return;
@@ -871,22 +925,26 @@ static void clean_old(long max_age_days, const char *current) {
     closedir(d);
   }
 
-  snprintf(dir, sizeof dir, "%s/%s", logdir, current);
-  d = opendir(dir);
+  d = opendir(logdir);
   if (d != NULL) {
     while ((de = readdir(d)) != NULL) {
-      if (de->d_name[0] == '.')
+      if (!is_day_name(de->d_name))
         continue;
-      snprintf(path, sizeof path, "%s/%s", dir, de->d_name);
-      if (stat(path, &sb) < 0)
+      snprintf(dir, sizeof dir, "%s/%s", logdir, de->d_name);
+      h = opendir(dir);
+      if (h == NULL)
         continue;
-      if (S_ISREG(sb.st_mode)) {
-        if (is_packed_gen_name(de->d_name) && sb.st_mtime < cutoff &&
-            unlink(path) == 0)
-          removed++;
-      } else if (S_ISDIR(sb.st_mode) && is_pid_name(de->d_name)) {
-        removed += clean_generation(path, cutoff);
+      while ((he = readdir(h)) != NULL) {
+        snprintf(path, sizeof path, "%s/%s", dir, he->d_name);
+        if (is_packed_hour_name(he->d_name)) {
+          if (stat(path, &sb) == 0 && S_ISREG(sb.st_mode) &&
+              sb.st_mtime < cutoff && unlink(path) == 0)
+            removed++;
+        } else if (is_hour_name(he->d_name)) {
+          removed += clean_hour(path, cutoff);
+        }
       }
+      closedir(h);
     }
     closedir(d);
   }
@@ -895,16 +953,30 @@ static void clean_old(long max_age_days, const char *current) {
         removed == 1 ? "" : "s", removed == 1 ? "y" : "ies", max_age_days);
 }
 
+/* One round of housekeeping. The caller holds the pass lock. */
+static void full_pass(long max_age, long disk_pct, long delete_pct) {
+  char now[ID_MAX], today[9], hour[3];
+
+  if (minute_path(time(NULL), use_utc, now, sizeof now) < 0)
+    return;
+  memcpy(today, now, 8);
+  today[8] = '\0';
+  memcpy(hour, now + 9, 2);
+  hour[2] = '\0';
+  archive_days(today);
+  pack_later(today, hour, now + 12);
+  pack_finished_hours(today, hour, disk_pct);
+  clean_old(max_age);
+  free_disk(delete_pct);
+}
+
 int main(int argc, char **argv) {
   const char *dir = NULL, *config = NULL, *age_s = NULL, *poll_opt = NULL;
   const char *disk_opt = NULL, *delete_opt = NULL;
-  const char *last_pid_file = LAST_PID_FILE;
   const char *v;
-  char cfg[PATH_BUF], cwd[PATH_BUF], boot[BOOT_STAMP_MAX];
-  char tmp[PATH_BUF + 64];
+  char cfg[PATH_BUF], cwd[PATH_BUF];
   long max_age = 30, interval_s = 6L * 3600, disk_pct = 90, delete_pct = 0;
-  long last = -1, cur;
-  int once = 0, i, n, pid_watch = 1, again;
+  int once = 0, i, n;
   time_t next_full, now;
   struct sigaction sa;
 
@@ -923,9 +995,6 @@ int main(int argc, char **argv) {
     } else if (opt_match(prog, argc, argv, &i, "-u",
                          "--compact-at-disk-percent", &v)) {
       disk_opt = v;
-    } else if (opt_match(prog, argc, argv, &i, "--last-pid-file",
-                         "--last-pid-file", &v)) {
-      last_pid_file = v;
     } else if (opt_match(prog, argc, argv, &i, "-1", "--once", NULL)) {
       once = 1;
     } else if (opt_match(prog, argc, argv, &i, "-V", "--version", NULL)) {
@@ -942,18 +1011,10 @@ int main(int argc, char **argv) {
   }
   journal = stderr_is_journal();
 
-  if (config) {
+  if (config)
     load_config(config, 1, &max_age, &interval_s, &disk_pct, &delete_pct);
-  } else {
-    const char *xdg = getenv("XDG_CONFIG_HOME"), *home = getenv("HOME");
-    n = -1;
-    if (xdg && xdg[0] == '/')
-      n = snprintf(cfg, sizeof cfg, "%s/babysit/babysit.conf", xdg);
-    else if (home && home[0] == '/')
-      n = snprintf(cfg, sizeof cfg, "%s/.config/babysit/babysit.conf", home);
-    if (n > 0 && (size_t)n < sizeof cfg)
-      load_config(cfg, 0, &max_age, &interval_s, &disk_pct, &delete_pct);
-  }
+  else if (default_config_path(cfg, sizeof cfg) == 0)
+    load_config(cfg, 0, &max_age, &interval_s, &disk_pct, &delete_pct);
   if (age_s && parse_num(age_s, &max_age) < 0) {
     fprintf(stderr, "babysitd: invalid --max-age-days '%s'\n", age_s);
     return EXIT_USAGE;
@@ -1009,26 +1070,11 @@ int main(int argc, char **argv) {
             strerror(errno));
     return EXIT_USAGE;
   }
-
-  current_boot(logdir, boot, sizeof boot);
-  remove_leftovers(logdir);
-  snprintf(tmp, sizeof tmp, "%s/archive", logdir);
-  remove_leftovers(tmp);
-  snprintf(tmp, sizeof tmp, "%s/%s", logdir, boot);
-  remove_leftovers(tmp);
-  archive_old_boots(boot);
-  check_disk(boot, disk_pct, 0);
-  again = compact_generations(boot);
-  clean_old(max_age, boot);
-  free_disk(boot, delete_pct);
+  remove_all_leftovers();
+  full_pass(max_age, disk_pct, delete_pct);
   pass_end();
   if (once)
     return 0;
-
-  if (read_last_pid(last_pid_file, &last) < 0) {
-    say(0, "%s is not readable; pid rollover is not monitored", last_pid_file);
-    pid_watch = 0;
-  }
 
   open_request_fifo();
   memset(&sa, 0, sizeof sa);
@@ -1045,8 +1091,6 @@ int main(int argc, char **argv) {
 
     now = time(NULL);
     wait_s = next_full > now ? (long long)(next_full - now) : 0;
-    if (again > 0 && again < wait_s)
-      wait_s = again; /* a generation is waiting for its writers */
     p.fd = req_fd;
     p.events = POLLIN;
     p.revents = 0;
@@ -1066,48 +1110,23 @@ int main(int argc, char **argv) {
     }
     now = time(NULL);
     full = now >= next_full;
-    if (!full && !requested && again == 0)
+    if (!full && !requested)
       continue;
     if (requested)
       say(0, "woken by a request on %s", REQUEST_FIFO);
+    if (full)
+      next_full = now + interval_s;
     if (pass_begin() < 0) {
       if (stop)
         break;
       say(1, "cannot lock %s/.lock (%s); skipping this pass", logdir,
           strerror(errno));
-      again = 0;
-      next_full = now + interval_s;
       continue;
     }
-    /* The log directory may have been emptied since the last pass, and
-     * babysit may have named this boot's directory afresh since then. */
+    /* The log directory may have been emptied since the last pass. */
     open_request_fifo();
-    snprintf(tmp, sizeof tmp, "%s", boot);
-    current_boot(logdir, boot, sizeof boot);
-    if (strcmp(tmp, boot) != 0)
-      say(0, "the current boot's logs are now under %s (was %s)", boot, tmp);
-    if (pid_watch && read_last_pid(last_pid_file, &cur) == 0) {
-      if (cur < last)
-        say(1,
-            "pid rollover detected (last pid went from %ld to "
-            "%ld); pids from this boot can now be reused, and "
-            "babysit starts a new log generation when it meets one "
-            "again",
-            last, cur);
-      last = cur;
-    }
-    if (full || requested) { /* the whole pass, scheduled or asked for */
-      archive_old_boots(boot);
-      check_disk(boot, disk_pct, 1);
-    }
-    again = compact_generations(boot);
-    if (full || requested) {
-      clean_old(max_age, boot);
-      free_disk(boot, delete_pct);
-    }
+    full_pass(max_age, disk_pct, delete_pct);
     pass_end();
-    if (full)
-      next_full = now + interval_s;
   }
   return 0;
 }

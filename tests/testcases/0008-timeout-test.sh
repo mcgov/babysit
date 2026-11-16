@@ -17,7 +17,7 @@
 # shellcheck source=tests/lib.sh
 . "$(dirname "$0")/../lib.sh"
 
-"$bs" --log-dir "$work/e" --timeout 1 -- sh -c 'for i in 1 2 3 4 5 6 7 8 9 10; do echo x; sleep 0.3; done' >/dev/null 2>&1
+"$bs" start --log-dir "$work/e" --timeout 1 -- sh -c 'for i in 1 2 3 4 5 6 7 8 9 10; do echo x; sleep 0.3; done' >/dev/null 2>&1
 check "--timeout" $? 124
 
 finish

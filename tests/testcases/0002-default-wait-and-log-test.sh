@@ -15,28 +15,26 @@
 #
 # Fails if:
 #   - the exit status is not the command's (3).
-#   - the log is not at <log-dir>/<boot>/<generation>/<babysit pid>/<command
-#     pid>/log.
+#   - the log is not at <log-dir>/<identifier>/log.
 #   - the log does not start with the command line and the "Process created"
 #     line, or lacks the OUT:/ERR: lines or the final exit line.
-#   - what babysit echoed differs from what it logged.
+#   - what babysit echoed on stderr differs from what it logged.
 
 # shellcheck source=tests/lib.sh
 . "$(dirname "$0")/../lib.sh"
 
-"$bs" --log-dir "$work/a" -- sh -c 'echo hi; echo oops >&2; exit 3' >"$work/o1" 2>"$work/e1"
+"$bs" start --log-dir "$work/a" -- sh -c 'echo hi; echo oops >&2; exit 3' >"$work/o1" 2>"$work/e1"
 check "default returns the exit code" $? 3
 log=$(logof "$work/o1")
-check "log path is dir/boot/gen/ppid/pid/log" \
-    "$(echo "$log" | grep -cE "^$work/a/$stamp/0/[0-9]+/[0-9]+/log$")" 1
+check "log path is dir/identifier/log" "$log" "$work/a/$(cat "$work/o1")/log"
 check "log line 1 is the command line" "$(sed -n 1p "$log")" \
     "sh -c 'echo hi; echo oops >&2; exit 3'"
 has "log has pid line" "$log" '^Process created with pid [0-9]'
 has "log has stdout" "$log" '^OUT: hi$'
 has "log has stderr" "$log" '^ERR: oops$'
 has "log has exit code" "$log" '^Process exited with code 3$'
-has "output is echoed" "$work/o1" '^OUT: hi$'
+has "output is echoed on stderr" "$work/e1" '^OUT: hi$'
 has "exit is reported on stderr" "$work/e1" 'exited with code 3'
-check "echo equals the log" "$(grep -v '^Log file: ' "$work/o1")" "$(cat "$log")"
+check "echo equals the log" "$(grep -v '^babysit: ' "$work/e1")" "$(cat "$log")"
 
 finish

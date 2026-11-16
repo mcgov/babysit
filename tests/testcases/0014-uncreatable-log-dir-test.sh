@@ -18,8 +18,8 @@
 . "$(dirname "$0")/../lib.sh"
 
 : >"$work/notdir"
-"$bs" --log-dir "$work/notdir/x" -- true >/dev/null 2>"$work/h7"
+"$bs" start --log-dir "$work/notdir/x" -- true >/dev/null 2>"$work/h7"
 check "uncreatable log directory is an error" $? 2
-has "uncreatable log directory is explained" "$work/h7" 'cannot create log'
+has "uncreatable log directory is explained" "$work/h7" 'cannot create a log directory'
 
 finish

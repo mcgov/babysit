@@ -6,46 +6,50 @@
  * license; see the file LICENSE for details.
  */
 /*
- * Shared by babysit and babysitd: the log directory layout and the
- * "does this log still have a writer" test.
+ * Shared by babysit and babysitd: the log directory layout, the
+ * configuration file, and the "does this log still have a writer" test.
  *
- *   <log-dir>/<boot timestamp>/<generation>/<babysit pid>/<command pid>/log
- *   <log-dir>/<boot timestamp>/<generation>.tar.gz             (babysitd)
- *   <log-dir>/archive/babysit_logs_<boot timestamp>.tar.gz     (babysitd)
+ *   <log-dir>/<YYYYmmdd>/<HH>/<MM>/<salt>/log
+ *   <log-dir>/<YYYYmmdd>/<HH>/<MM>/<salt>/exit_code   once it has exited
+ *   <log-dir>/<YYYYmmdd>/<HH>/<MM>/<salt>/ctl         while it is running
+ *   <log-dir>/<YYYYmmdd>/<HH>.tar.gz                           (babysitd)
+ *   <log-dir>/archive/babysit_logs_<YYYYmmdd>.tar.gz           (babysitd)
  *
- * Pids are only unique within one boot, so every boot gets its own
- * directory, named after the time the system booted.
+ * Every run of babysit is an instance with an identifier of its own,
+ * "<YYYYmmdd>/<HH>/<MM>/<salt>": the minute it started in and four random
+ * characters. The identifier is the path of the instance's directory under
+ * the log directory, so it can be read, and used, as it stands. It is made
+ * unique by creating that directory with mkdir(), which fails if another
+ * instance got there first; the next salt is then tried.
  *
- * Within a boot, logs go to the highest-numbered generation, starting at 0.
- * When a pid comes round again and its place in that generation is taken,
- * babysit starts the next generation instead of touching the old log. A
- * generation that is no longer the highest gets no new logs, so babysitd
- * packs it into <generation>.tar.gz once its last writer has finished.
+ * Nothing in the layout is a pid. A pid says which process something is
+ * only while that process is alive, so the pid of the command is given out
+ * (babysit info --pid) only for as long as it is, and signals for it are
+ * handed to its babysitter through the ctl FIFO (babysit signal).
  *
- * A babysitter holds an fcntl() write lock on its log for as long as it is
- * logging. The kernel drops the lock when the babysitter exits, however it
- * exits, so "is the log locked" is a reliable "is it still being written".
+ * A babysitter holds two fcntl() write locks on its log: on byte 0 for as
+ * long as it is logging, and on byte 1 for as long as the command has not
+ * been reaped. The kernel drops them when the babysitter exits, however it
+ * exits, so "is byte 0 locked" is a reliable "is it still being written"
+ * and "is byte 1 locked" a reliable "is that pid still the command".
  *
- * POSIX.1-2008 + XSI, C99; sysctl() for the boot time on the BSDs and macOS.
+ * POSIX.1-2008 + XSI, C99.
  */
 #ifndef BABYSIT_H
 #define BABYSIT_H
 
 /*
- * Feature-test macros. The BSDs and macOS expose POSIX plus their own
- * sysctl() by default, and asking for strict POSIX would hide sysctl();
- * everywhere else POSIX.1-2008 + XSI is requested explicitly.
+ * Feature-test macros. The BSDs and macOS expose everything used here by
+ * default; elsewhere POSIX.1-2008 + XSI is requested explicitly.
  */
-#if defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) ||     \
-    defined(__DragonFly__)
-#define BABYSIT_HAVE_SYSCTL 1
-#elif defined(__APPLE__)
-#define BABYSIT_HAVE_SYSCTL 1
+#if defined(__APPLE__)
 #ifndef _DARWIN_C_SOURCE
 /* NOLINTNEXTLINE(bugprone-reserved-identifier,cert-dcl37-c,cert-dcl51-cpp) */
 #define _DARWIN_C_SOURCE 1
 #endif
-#elif !defined(_XOPEN_SOURCE)
+#elif !defined(__FreeBSD__) && !defined(__NetBSD__) &&                         \
+    !defined(__OpenBSD__) && !defined(__DragonFly__) &&                        \
+    !defined(_XOPEN_SOURCE)
 /* NOLINTNEXTLINE(bugprone-reserved-identifier,cert-dcl37-c,cert-dcl51-cpp) */
 #define _XOPEN_SOURCE 700
 #endif
@@ -66,13 +70,11 @@
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
-#ifdef BABYSIT_HAVE_SYSCTL
-#include <sys/sysctl.h>
-#endif
 
 #define BABYSIT_VERSION "0.1.0"
 
 #define EXIT_USAGE 2
+#define EXIT_AGAIN 75 /* EX_TEMPFAIL: nothing started; try again later */
 
 /*
  * Processes that leave through _exit() skip the atexit hook that writes
@@ -134,8 +136,9 @@ static inline int mkdirs(const char *path) {
 /* FIFO in the log directory on which babysitd listens for early requests. */
 #define REQUEST_FIFO ".request"
 
-/* Wake babysitd, if it is running. Never blocks; failure is harmless. */
-static inline void request_packing(const char *logdir) {
+/* Ask babysitd for a pass now, if it is running. Never blocks; failure is
+ * harmless. */
+static inline void request_pass(const char *logdir) {
   char path[PATH_BUF + 32];
   int fd, n;
   ssize_t w;
@@ -150,10 +153,6 @@ static inline void request_packing(const char *logdir) {
   (void)w;
   close(fd);
 }
-
-#define BOOT_ID_FILE "/proc/sys/kernel/random/boot_id"
-#define BOOT_STAMP_MAX 32
-#define UNKNOWN_BOOT "unknown-boot"
 
 static inline int read_first_line(const char *path, char *buf, size_t n) {
   FILE *f = fopen(path, "r");
@@ -172,138 +171,108 @@ static inline int read_first_line(const char *path, char *buf, size_t n) {
   return 0;
 }
 
-/* Seconds since the epoch at which the system booted, or 0 if unknown. */
-static inline time_t boot_time(void) {
-#ifdef BABYSIT_HAVE_SYSCTL
-  int mib[2] = {CTL_KERN, KERN_BOOTTIME};
-  struct timeval tv;
-  size_t len = sizeof tv;
+/* ---------- configuration shared by both programs ---------- */
 
-  if (sysctl(mib, 2, &tv, &len, NULL, 0) == 0)
-    return tv.tv_sec;
-  return 0;
-#else
-  char line[256];
-  FILE *f = fopen("/proc/stat", "r");
-  long long t = 0;
+/* $XDG_CONFIG_HOME/babysit/babysit.conf, or under $HOME/.config. */
+static inline int default_config_path(char *buf, size_t n) {
+  const char *xdg = getenv("XDG_CONFIG_HOME"), *home = getenv("HOME");
+  int len = -1;
 
-  if (!f)
-    return 0;
-  while (fgets(line, sizeof line, f)) {
-    if (strncmp(line, "btime ", 6) == 0) {
-      t = strtoll(line + 6, NULL, 10);
-      break;
-    }
-  }
-  fclose(f);
-  return t > 0 ? (time_t)t : 0;
-#endif
+  if (xdg && xdg[0] == '/')
+    len = snprintf(buf, n, "%s/babysit/babysit.conf", xdg);
+  else if (home && home[0] == '/')
+    len = snprintf(buf, n, "%s/.config/babysit/babysit.conf", home);
+  return (len < 0 || (size_t)len >= n) ? -1 : 0;
 }
 
-/*
- * Something that identifies the current boot: the kernel's random boot id
- * on Linux, otherwise the boot time in seconds. Returns -1 if neither is
- * available.
- */
-static inline int boot_identity(char *id, size_t n) {
-  time_t bt;
+/* "local" or "utc" (any case), trailing blanks allowed. */
+static inline int parse_timezone(const char *val, int *utc) {
+  char word[8];
+  size_t i;
 
-  if (read_first_line(BOOT_ID_FILE, id, n) == 0 && id[0])
-    return 0;
-  bt = boot_time();
-  if (bt == 0)
+  for (i = 0; i < sizeof word - 1 && val[i] && val[i] != ' ' &&
+              val[i] != '\t' && val[i] != '\r' && val[i] != '\n';
+       i++)
+    word[i] = (char)(val[i] >= 'A' && val[i] <= 'Z' ? val[i] + 32 : val[i]);
+  word[i] = '\0';
+  while (val[i] == ' ' || val[i] == '\t' || val[i] == '\r' || val[i] == '\n')
+    i++;
+  if (val[i])
     return -1;
-  snprintf(id, n, "%lld", (long long)bt);
+  if (strcmp(word, "utc") == 0)
+    *utc = 1;
+  else if (strcmp(word, "local") == 0)
+    *utc = 0;
+  else
+    return -1;
   return 0;
 }
 
 /*
- * Do two boot identities name the same boot? A boot time can move a little
- * when the clock is corrected, so two of those match within two minutes.
+ * Split one line of the configuration file into its key and value, in
+ * place. Returns 0 for a blank line or comment, 1 for "key = value", -1
+ * for anything else.
  */
-static inline int same_boot(const char *a, const char *b) {
-  long long x, y;
+static inline int config_split(char *line, char **key, char **val) {
+  char *end;
 
-  if (is_pid_name(a) && is_pid_name(b)) {
-    x = strtoll(a, NULL, 10);
-    y = strtoll(b, NULL, 10);
-    return (x > y ? x - y : y - x) <= 120;
-  }
-  return strcmp(a, b) == 0;
+  while (*line == ' ' || *line == '\t')
+    line++;
+  if (*line == '#' || *line == '\n' || *line == '\r' || *line == '\0')
+    return 0;
+  *val = strchr(line, '=');
+  if (!*val)
+    return -1;
+  end = *val;
+  while (end > line && (end[-1] == ' ' || end[-1] == '\t'))
+    end--;
+  *end = '\0';
+  (*val)++;
+  while (**val == ' ' || **val == '\t')
+    (*val)++;
+  *key = line;
+  return 1;
 }
 
-/*
- * Name of the current boot's directory, as YYYYmmdd-HHMMSS.
- *
- * The kernel's idea of the boot time can shift when the clock is adjusted,
- * so the name is worked out once per boot and remembered in <log-dir>/.boot
- * next to the boot's identity; later callers reuse it as long as the
- * identity still matches. Where the system offers no way to tell boots
- * apart, all logs go under "unknown-boot" and are never archived.
- */
-static inline void current_boot(const char *logdir, char *stamp, size_t n) {
-  char id[128], old_id[128], old_stamp[BOOT_STAMP_MAX];
-  char marker[PATH_BUF + 16], tmp[PATH_BUF + 48], line[256];
-  struct tm *tm;
-  time_t bt;
-  FILE *f;
+/* ---------- instance identifiers ---------- */
 
-  if (boot_identity(id, sizeof id) < 0) {
-    snprintf(stamp, n, "%s", UNKNOWN_BOOT);
-    return;
-  }
-  snprintf(marker, sizeof marker, "%s/.boot", logdir);
-  if (read_first_line(marker, line, sizeof line) == 0 &&
-      sscanf(line, "%127s %31s", old_id, old_stamp) == 2 &&
-      same_boot(old_id, id)) {
-    snprintf(stamp, n, "%s", old_stamp);
-    return;
-  }
-  bt = boot_time();
-  if (bt == 0)
-    bt = time(NULL);
-  tm = localtime(&bt);
-  if (!tm || strftime(stamp, n, "%Y%m%d-%H%M%S", tm) == 0) {
-    snprintf(stamp, n, "%s", UNKNOWN_BOOT);
-    return;
-  }
-  if (mkdirs(logdir) < 0)
-    return;
-  snprintf(tmp, sizeof tmp, "%s/.boot.%ld", logdir, (long)getpid());
-  f = fopen(tmp, "w");
-  if (!f)
-    return;
-  fprintf(f, "%s %s\n", id, stamp);
-  if (fclose(f) != 0 || rename(tmp, marker) < 0)
-    unlink(tmp);
-}
+#define SALT_LEN 4
+#define ID_MAX 32 /* "YYYYmmdd/HH/MM/ssss" and room to spare */
 
-/*
- * Is NAME the name babysit gives a boot directory: YYYYmmdd-HHMMSS, or
- * "unknown-boot"? babysitd touches nothing else in the log directory.
- */
-static inline int is_boot_name(const char *name) {
+/* The characters a salt is made of: no 0/o or 1/l to mistake for another. */
+static const char salt_chars[] = "abcdefghijkmnpqrstuvwxyz23456789";
+
+/* Does S start with exactly N digits, followed by the character AFTER? */
+static inline int digits_then(const char *s, int n, char after) {
   int i;
 
-  if (strcmp(name, UNKNOWN_BOOT) == 0)
-    return 1;
-  for (i = 0; i < 15; i++) {
-    if (i == 8 ? name[i] != '-' : (name[i] < '0' || name[i] > '9'))
+  for (i = 0; i < n; i++)
+    if (s[i] < '0' || s[i] > '9')
       return 0;
-  }
-  return name[15] == '\0';
+  return s[n] == after;
 }
 
-/* Is NAME "<number>.tar.gz", a packed generation? */
-static inline int is_packed_gen_name(const char *name) {
-  const char *p = name;
-
-  while (*p >= '0' && *p <= '9')
-    p++;
-  return p != name && strcmp(p, ".tar.gz") == 0;
+static inline int is_day_name(const char *s) { return digits_then(s, 8, '\0'); }
+static inline int is_hour_name(const char *s) {
+  return digits_then(s, 2, '\0');
 }
 
-/* Is NAME "babysit_logs_<something>.tar.gz", the archive of a boot? */
+static inline int is_salt_name(const char *s) {
+  int i;
+
+  for (i = 0; i < SALT_LEN; i++)
+    if (!s[i] || !strchr(salt_chars, s[i]))
+      return 0;
+  return s[SALT_LEN] == '\0';
+}
+
+/* Is ID "<YYYYmmdd>/<HH>/<MM>/<salt>" and nothing else? */
+static inline int is_instance_id(const char *id) {
+  return digits_then(id, 8, '/') && digits_then(id + 9, 2, '/') &&
+         digits_then(id + 12, 2, '/') && is_salt_name(id + 15);
+}
+
+/* Is NAME "babysit_logs_<something>.tar.gz", the archive of a day? */
 static inline int is_archive_name(const char *name) {
   size_t len = strlen(name);
 
@@ -311,18 +280,134 @@ static inline int is_archive_name(const char *name) {
          strcmp(name + len - 7, ".tar.gz") == 0;
 }
 
-/* Take the writer lock on an open log. */
-static inline int lock_log(int fd) {
+/* Is NAME "<HH>.tar.gz" or "<HH>.<n>.tar.gz", a packed hour? */
+static inline int is_packed_hour_name(const char *name) {
+  const char *p = name + 2;
+
+  if (name[0] < '0' || name[0] > '9' || name[1] < '0' || name[1] > '9')
+    return 0;
+  if (*p == '.' && p[1] >= '0' && p[1] <= '9') {
+    p++;
+    while (*p >= '0' && *p <= '9')
+      p++;
+  }
+  return strcmp(p, ".tar.gz") == 0;
+}
+
+/* "<YYYYmmdd>/<HH>/<MM>" for time T, in UTC or local time. */
+static inline int minute_path(time_t t, int utc, char *buf, size_t n) {
+  struct tm *tm = utc ? gmtime(&t) : localtime(&t);
+
+  return (tm && strftime(buf, n, "%Y%m%d/%H/%M", tm) > 0) ? 0 : -1;
+}
+
+/*
+ * Is there a directory in DIR whose name IS_NAME accepts and which sorts
+ * after REF? Its name is copied to FOUND.
+ */
+static inline int later_entry(const char *dir, int (*is_name)(const char *),
+                              const char *ref, char *found, size_t n) {
+  char path[PATH_BUF + 300];
+  struct dirent *de;
+  struct stat sb;
+  DIR *d = opendir(dir);
+  int hit = 0;
+
+  if (!d)
+    return 0;
+  while (!hit && (de = readdir(d)) != NULL) {
+    if (!is_name(de->d_name) || strcmp(de->d_name, ref) <= 0)
+      continue;
+    snprintf(path, sizeof path, "%s/%s", dir, de->d_name);
+    if (stat(path, &sb) == 0 && S_ISDIR(sb.st_mode)) {
+      snprintf(found, n, "%s", de->d_name);
+      hit = 1;
+    }
+  }
+  closedir(d);
+  return hit;
+}
+
+/*
+ * Does LOGDIR hold records dated later than MINUTE ("YYYYmmdd/HH/MM")? If
+ * so the clock has been set back since they were filed (or the timezone
+ * setting changed), and new records would be filed in among older ones that
+ * claim to be newer. FOUND gets the first such directory, relative to
+ * LOGDIR.
+ */
+static inline int find_later(const char *logdir, const char *minute,
+                             char *found, size_t n) {
+  char day[9], hour[3], dir[PATH_BUF + 32], name[16];
+
+  memcpy(day, minute, 8);
+  day[8] = '\0';
+  memcpy(hour, minute + 9, 2);
+  hour[2] = '\0';
+  if (later_entry(logdir, is_day_name, day, name, sizeof name)) {
+    snprintf(found, n, "%s", name);
+    return 1;
+  }
+  snprintf(dir, sizeof dir, "%s/%s", logdir, day);
+  if (later_entry(dir, is_hour_name, hour, name, sizeof name)) {
+    snprintf(found, n, "%s/%s", day, name);
+    return 1;
+  }
+  snprintf(dir, sizeof dir, "%s/%s/%s", logdir, day, hour);
+  if (later_entry(dir, is_hour_name, minute + 12, name, sizeof name)) {
+    snprintf(found, n, "%s/%s/%s", day, hour, name);
+    return 1;
+  }
+  return 0;
+}
+
+/* ---------- who is still writing ---------- */
+
+static inline int lock_byte(int fd, off_t byte, short type) {
   struct flock fl;
 
   memset(&fl, 0, sizeof fl);
-  fl.l_type = F_WRLCK;
+  fl.l_type = type;
   fl.l_whence = SEEK_SET;
+  fl.l_start = byte;
+  fl.l_len = 1;
   return fcntl(fd, F_SETLK, &fl);
 }
 
+#define LOCK_WRITER 0 /* held while the babysitter is logging */
+#define LOCK_CHILD 1  /* held until the command has been reaped */
+
 /* Did the last open()/opendir() fail because there is nothing there? */
 static inline int is_absent(int err) { return err == ENOENT || err == ENOTDIR; }
+
+/*
+ * Is BYTE of the log at PATH locked by another process? 1 yes, 0 no, -1 if
+ * that cannot be found out (and *absent says whether the log is simply not
+ * there).
+ */
+static inline int byte_locked(const char *path, off_t byte, int *absent) {
+  struct flock fl;
+  int fd, rc;
+
+  *absent = 0;
+  fd = open(path, O_RDWR);
+  if (fd < 0)
+    fd = open(path, O_RDONLY);
+  if (fd < 0) {
+    *absent = is_absent(errno);
+    return -1;
+  }
+  memset(&fl, 0, sizeof fl);
+  fl.l_type = F_WRLCK;
+  fl.l_whence = SEEK_SET;
+  fl.l_start = byte;
+  fl.l_len = 1;
+  if (fcntl(fd, F_GETLK, &fl) < 0)
+    rc = -1;
+  else
+    rc = fl.l_type != F_UNLCK;
+  close(fd);
+  return rc;
+}
 
 /*
  * 1 if another process holds the writer lock on this log, else 0.
@@ -332,82 +417,48 @@ static inline int is_absent(int err) { return err == ENOENT || err == ENOTDIR; }
  * who holds a lock, is left alone. Only a log that is not there has none.
  */
 static inline int log_has_writer(const char *path) {
-  struct flock fl;
-  int fd, busy = 0;
+  int absent, rc = byte_locked(path, LOCK_WRITER, &absent);
 
-  fd = open(path, O_RDWR);
-  if (fd < 0)
-    fd = open(path, O_RDONLY);
-  if (fd < 0)
-    return !is_absent(errno);
-  memset(&fl, 0, sizeof fl);
-  fl.l_type = F_WRLCK;
-  fl.l_whence = SEEK_SET;
-  if (fcntl(fd, F_GETLK, &fl) < 0 || fl.l_type != F_UNLCK)
-    busy = 1;
-  close(fd);
-  return busy;
-}
-
-/* 1 if any <dir>/<pid>/log (dir = <log-dir>/<babysit pid>) has a writer. */
-static inline int ppid_dir_has_writer(const char *dir) {
-  char path[PATH_BUF];
-  struct dirent *de;
-  DIR *d = opendir(dir);
-  int busy = 0, n;
-
-  if (!d)
-    return !is_absent(errno);
-  while (!busy && (de = readdir(d)) != NULL) {
-    if (!is_pid_name(de->d_name))
-      continue;
-    n = snprintf(path, sizeof path, "%s/%s/log", dir, de->d_name);
-    busy = (n > 0 && (size_t)n < sizeof path) ? log_has_writer(path) : 1;
-  }
-  closedir(d);
-  return busy;
-}
-
-/* 1 if any log under <boot>/<generation> has a writer. */
-static inline int gen_dir_has_writer(const char *gendir) {
-  char path[PATH_BUF + 600];
-  struct dirent *de;
-  DIR *d = opendir(gendir);
-  int busy = 0, n;
-
-  if (!d)
-    return !is_absent(errno);
-  while (!busy && (de = readdir(d)) != NULL) {
-    if (!is_pid_name(de->d_name))
-      continue;
-    n = snprintf(path, sizeof path, "%s/%s", gendir, de->d_name);
-    busy = (n > 0 && (size_t)n < sizeof path) ? ppid_dir_has_writer(path) : 1;
-  }
-  closedir(d);
-  return busy;
+  return rc < 0 ? !absent : rc;
 }
 
 /*
- * Highest generation number present under <log-dir>/<boot>, counting both
- * live directories ("3") and packed ones ("3.tar.gz"); -1 if there is none.
+ * 1 if the command logged at PATH has certainly not been reaped yet. Here
+ * doubt counts the other way: a pid is only worth giving out if it is sure
+ * to be the command's.
  */
-static inline long current_gen(const char *bootdir) {
-  struct dirent *de;
-  DIR *d = opendir(bootdir);
-  long best = -1, g;
-  char *end;
+static inline int child_is_running(const char *path) {
+  int absent;
 
-  if (!d)
-    return -1;
-  while ((de = readdir(d)) != NULL) {
-    if (de->d_name[0] < '0' || de->d_name[0] > '9')
-      continue;
-    g = strtol(de->d_name, &end, 10);
-    if ((*end == '\0' || strcmp(end, ".tar.gz") == 0) && g > best)
-      best = g;
+  return byte_locked(path, LOCK_CHILD, &absent) == 1;
+}
+
+/* 1 if any file called "log" anywhere under DIR has a writer. */
+static int tree_busy;
+static inline int tree_writer_cb(const char *path, const struct stat *sb,
+                                 int flag, struct FTW *ftw) {
+  (void)sb;
+  if (flag == FTW_DNR || flag == FTW_NS) {
+    tree_busy = 1; /* cannot look inside: assume the worst */
+    return 1;
   }
-  closedir(d);
-  return best;
+  if (flag == FTW_F && strcmp(path + ftw->base, "log") == 0 &&
+      log_has_writer(path)) {
+    tree_busy = 1;
+    return 1;
+  }
+  return 0;
+}
+
+static inline int tree_has_writer(const char *dir) {
+  struct stat sb;
+
+  if (stat(dir, &sb) < 0)
+    return !is_absent(errno);
+  tree_busy = 0;
+  if (nftw(dir, tree_writer_cb, 16, FTW_PHYS) < 0)
+    return 1;
+  return tree_busy;
 }
 
 static inline int remove_tree_cb(const char *path, const struct stat *sb,

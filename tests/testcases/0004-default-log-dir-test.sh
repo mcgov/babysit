@@ -11,14 +11,13 @@
 #      dir.
 #
 # Fails if:
-#   - the reported log path is not under
-#     $HOME/.local/var/log/babysit/<boot>/0/.
+#   - the log is not at $HOME/.local/var/log/babysit/<identifier>/log.
 
 # shellcheck source=tests/lib.sh
 . "$(dirname "$0")/../lib.sh"
 
-HOME="$work/home" "$bs" -- true >"$work/o1c" 2>/dev/null
+HOME="$work/home" "$bs" start -- true >"$work/o1c" 2>/dev/null
 check "default dir is ~/.local/var/log/babysit" \
-    "$(logof "$work/o1c" | grep -cE "^$work/home/.local/var/log/babysit/$stamp/0/[0-9]+/[0-9]+/log$")" 1
+    "$(logof "$work/o1c")" "$work/home/.local/var/log/babysit/$(cat "$work/o1c")/log"
 
 finish

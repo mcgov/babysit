@@ -9,42 +9,46 @@
 #   off, not packed again over the complete tarball.
 #
 # Procedure:
-#   1. Lay out what a killed run leaves: a complete packed generation next
-#      to a half-removed "0.removing" directory, and the same for an earlier
-#      boot whose archive already exists.
+#   1. Lay out what a killed run leaves: a complete archive next to a
+#      half-removed "<day>.removing" directory, and the same for a packed
+#      hour in a day that cannot be archived yet.
 #   2. Run "babysitd --once".
-#   3. Pack a fresh generation and check nothing is left over from that.
+#   3. Let that day be archived and check nothing is left over.
 #
 # Fails if:
-#   - the packed generation or the archive no longer holds both logs.
+#   - the archive or the packed hour no longer holds both logs.
 #   - a .removing directory is left behind, or a second archive is made.
 
 # shellcheck source=tests/lib.sh
 . "$(dirname "$0")/../lib.sh"
 
 d="$work/kr"
-mkdir -p "$d/$stamp/0/100/101" "$d/$stamp/0/200/201" "$d/$stamp/1/300/301" \
-    "$d/20230101-000000/0/1/2" "$d/20230101-000000/0/3/4" "$d/archive"
-echo one >"$d/$stamp/0/100/101/log"; echo two >"$d/$stamp/0/200/201/log"
-echo live >"$d/$stamp/1/300/301/log"
-echo a >"$d/20230101-000000/0/1/2/log"; echo b >"$d/20230101-000000/0/3/4/log"
-tar -czf "$d/$stamp/0.tar.gz" -C "$d/$stamp" 0
-tar -czf "$d/archive/babysit_logs_20230101-000000.tar.gz" -C "$d" 20230101-000000
-mv "$d/$stamp/0" "$d/$stamp/0.removing"; rm -r "$d/$stamp/0.removing/100"
-mv "$d/20230101-000000" "$d/20230101-000000.removing"; rm -r "$d/20230101-000000.removing/0/1"
+plant "$d" 20230101/01/02/aaaa a
+plant "$d" 20230101/03/04/bbbb b
+mkdir -p "$d/archive"
+tar -czf "$d/archive/babysit_logs_20230101.tar.gz" -C "$d" 20230101
+mv "$d/20230101" "$d/20230101.removing"; rm -r "$d/20230101.removing/01"
+
+plant "$d" 20230102/05/06/cccc one
+plant "$d" 20230102/05/07/dddd two
+plant "$d" 20230102/08/09/eeee live
+tar -czf "$d/20230102/05.tar.gz" -C "$d/20230102" 05
+mv "$d/20230102/05" "$d/20230102/05.removing"; rm -r "$d/20230102/05.removing/06"
+"$lp" --hold 2 "$d/20230102/08/09/eeee/log" &
+sleep 0.5
 
 "$bsd" --once --log-dir "$d" --config /dev/null -u 0 2>"$work/kr.err"
-check "the packed generation still holds both logs" \
-    "$(tar -tzf "$d/$stamp/0.tar.gz" | grep -c '/log$')" 2
 check "the archive still holds both logs, and there is only one" \
-    "$(tar -tzf "$d/archive/babysit_logs_20230101-000000.tar.gz" | grep -c '/log$') $(ls "$d/archive" | count)" "2 1"
+    "$(tar -tzf "$d/archive/babysit_logs_20230101.tar.gz" | grep -c '/log$') $(ls "$d/archive" | count)" "2 1"
+check "the packed hour still holds both logs" \
+    "$(tar -tzf "$d/20230102/05.tar.gz" | grep -c '/log$')" 2
 check "the half-removed directories are gone" \
     "$(find "$d" -name '*.removing' | count)" 0
-
-mkdir -p "$d/$stamp/2/400/401"; echo newer >"$d/$stamp/2/400/401/log"
-touch -t "$old1m" "$d/$stamp/1"
+wait
+settle "$d/20230102"
 "$bsd" --once --log-dir "$d" --config /dev/null -u 0 2>>"$work/kr.err"
-check "a normal pack leaves the tarball and nothing else" \
-    "$(ls "$d/$stamp" | tr '\n' ' ')" "0.tar.gz 1.tar.gz 2 "
+check "a normal pack leaves the archives and nothing else" \
+    "$(ls "$d" | tr '\n' ' '; ls "$d/archive" | tr '\n' ' ')" \
+    "archive babysit_logs_20230101.tar.gz babysit_logs_20230102.tar.gz "
 
 finish

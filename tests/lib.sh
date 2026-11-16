@@ -12,14 +12,21 @@
 #
 #   $bs, $bsd, $lp   paths of babysit, babysitd and the lockprobe helper
 #   $work            a scratch directory, removed when the test exits
-#   $stamp           the name of the current boot's log directory
+#   $today           today's date as babysit writes it in an identifier
 #   $version         the version defined in babysit.h
 #   $old1m, $old10d  "touch -t" timestamps one minute and ten days ago
 #
 #   check DESC ACTUAL EXPECTED   pass if the two strings are equal
 #   has DESC FILE PATTERN        pass if grep finds PATTERN in FILE
-#   logof FILE                   the log path babysit printed into FILE
+#   idof FILE                    the instance identifier babysit printed
+#                                into FILE (its stdout, alone or mixed with
+#                                its stderr)
+#   logof FILE                   the path of that instance's log
 #   ago SECONDS                  a "touch -t" timestamp that long ago
+#   plant DIR ID TEXT            lay out a finished instance by hand: a log
+#                                holding TEXT at DIR/ID/log, old enough for
+#                                babysitd to pack
+#   settle PATH...               make everything under PATH look a minute old
 #   count                        count lines on stdin (no padding)
 #   quick START LIMIT            print "y" if fewer than LIMIT seconds have
 #                                passed since START (from "date +%s")
@@ -91,13 +98,18 @@ has() { # description, file, pattern
     fi
 }
 
-logof() { sed -n 's/^Log file: //p' "$1"; }
+idof() { grep -m 1 -E '^[0-9]{8}/[0-9]{2}/[0-9]{2}/[a-z0-9]{4}$' "$1"; }
+logof() { find "$work" -path "*/$(idof "$1")/log" 2>/dev/null | head -n 1; }
 
 # touch -t stamp for N seconds ago (GNU date, then BSD date)
 ago() {
     local t=$(( $(date +%s) - $1 ))
     date -d "@$t" +%Y%m%d%H%M.%S 2>/dev/null || date -r "$t" +%Y%m%d%H%M.%S
 }
+
+# babysitd leaves alone whatever changed in the last two seconds.
+settle() { find "$@" -exec touch -t "$old1m" {} +; }
+plant() { mkdir -p "$1/$2" && echo "$3" >"$1/$2/log" && settle "$1/${2%%/*}"; }
 
 count() { wc -l | tr -d ' '; }      # BSD wc pads its output
 
@@ -112,7 +124,8 @@ finish() {
 old10d=$(ago 864000)
 old1m=$(ago 60)
 
-# Every log of this boot goes under <log-dir>/<boot timestamp>/; learn the
-# name once by letting babysit create it in a directory of its own.
-"$bs" --log-dir "$work/.stamp" -- true >/dev/null 2>&1
-stamp=$(ls "$work/.stamp")
+# Identifiers start with the date. The tests run in local time whatever
+# the invoking user's own babysit.conf says, so point the programs at a
+# configuration directory that has none.
+export XDG_CONFIG_HOME="$work/.config"
+today=$(date +%Y%m%d)

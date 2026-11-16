@@ -34,6 +34,8 @@ check_interval = soon
 compact_at_disk_percent = many
 no equals sign here
 surprise = 1
+timezone = utc
+timezone = mars
 CONF
 "$bsd" --once --log-dir "$work/dc" --config "$work/messy.conf" --check-interval 1h -a 3 -u 0 2>"$work/d4"
 check "babysitd: a config with bad lines still runs" $? 0
@@ -41,6 +43,7 @@ has "config: bad duration reported with its line" "$work/d4" 'messy.conf:8: expe
 has "config: bad number reported" "$work/d4" 'messy.conf:9: value must be a non-negative number'
 has "config: missing = reported" "$work/d4" "messy.conf:10: expected 'key = value'"
 has "config: unknown key reported" "$work/d4" "messy.conf:11: unknown key 'surprise'"
-check "config: good lines are not reported" "$(grep -c 'messy.conf' "$work/d4")" 4
+has "config: bad timezone reported" "$work/d4" 'messy.conf:13: timezone must be local or utc'
+check "config: good lines are not reported" "$(grep -c 'messy.conf' "$work/d4")" 5
 
 finish

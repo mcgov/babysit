@@ -21,13 +21,13 @@
 # shellcheck source=tests/lib.sh
 . "$(dirname "$0")/../lib.sh"
 
-"$bs" --log-dir "$work/oh" -- sh -c 'head -c 5000 /dev/zero | tr "\0" x; echo' >"$work/h8" 2>/dev/null
+"$bs" start --log-dir "$work/oh" -- sh -c 'head -c 5000 /dev/zero | tr "\0" x; echo' >"$work/h8" 2>/dev/null
 check "long lines are split at 4096 bytes" \
     "$(grep '^OUT: ' "$(logof "$work/h8")" | awk '{ print length($0) - 5 }' | tr '\n' ' ')" "4096 904 "
-"$bs" --log-dir "$work/oh" -- sh -c 'printf tail; printf etail >&2' >"$work/h9" 2>/dev/null
+"$bs" start --log-dir "$work/oh" -- sh -c 'printf tail; printf etail >&2' >"$work/h9" 2>/dev/null
 check "unterminated last lines are logged" \
     "$(grep -c -e '^OUT: tail$' -e '^ERR: etail$' "$(logof "$work/h9")")" 2
-"$bs" --log-dir "$work/oh" -- sh -c 'echo; echo x' >"$work/h10" 2>/dev/null
+"$bs" start --log-dir "$work/oh" -- sh -c 'echo; echo x' >"$work/h10" 2>/dev/null
 check "empty lines are kept" "$(sed -n 3p "$(logof "$work/h10")")" "OUT: "
 
 finish

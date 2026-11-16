@@ -21,7 +21,7 @@
 . "$(dirname "$0")/../lib.sh"
 
 t=$(date +%s)
-"$bs" --log-dir "$work/b" --detach -- sh -c 'sleep 2; echo bye' >"$work/o2" 2>&1
+"$bs" start --log-dir "$work/b" --detach -- sh -c 'sleep 2; echo bye' >"$work/o2" 2>&1
 check "--detach exits 0" $? 0
 check "--detach returns immediately" "$(quick "$t" 2)" y
 has "--detach prints pid line" "$work/o2" '^Process created with pid [0-9]'

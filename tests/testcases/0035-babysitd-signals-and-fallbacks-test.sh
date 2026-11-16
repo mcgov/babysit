@@ -24,17 +24,11 @@
 . "$(dirname "$0")/../lib.sh"
 
 mkdir -p "$work/sv/.request"                      # a directory where the FIFO should be
-"$bsd" --log-dir "$work/sv" --config /dev/null --last-pid-file "$work/no-such-file" 2>"$work/d8" &
+"$bsd" --log-dir "$work/sv" --config /dev/null 2>"$work/d8" &
 sv=$!
 sleep 0.7; kill "$sv"; wait "$sv"
 check "babysitd: SIGTERM is a clean exit" $? 0
 has "babysitd: unusable FIFO is reported" "$work/d8" 'is not usable'
-if [ "$(uname -s)" = FreeBSD ]; then  # falls back to the kern.lastpid sysctl
-    check "babysitd: last pid comes from sysctl when the file is missing" \
-        "$(grep -c 'pid rollover is not monitored' "$work/d8")" 0
-else
-    has "babysitd: unreadable last-pid file is reported" "$work/d8" 'pid rollover is not monitored'
-fi
 "$bsd" --log-dir "$work/sv2" --config /dev/null 2>/dev/null &
 sv=$!
 sleep 0.5; kill -INT "$sv"; wait "$sv"

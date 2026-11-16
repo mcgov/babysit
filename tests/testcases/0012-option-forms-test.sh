@@ -24,14 +24,14 @@
 # shellcheck source=tests/lib.sh
 . "$(dirname "$0")/../lib.sh"
 
-(cd "$work" && "$bs" --log-dir rel -- true >"$work/h5" 2>/dev/null)
+(cd "$work" && "$bs" start --log-dir rel -- true >"$work/h5" 2>/dev/null)
 check "relative --log-dir is resolved against the cwd" \
-    "$(logof "$work/h5" | grep -cE "^$work/rel/$stamp/0/[0-9]+/[0-9]+/log$")" 1
-"$bs" --log-dir="$work/eq" --idle=1m --timeout=1h -- true >/dev/null 2>&1
+    "$(logof "$work/h5")" "$work/rel/$(cat "$work/h5")/log"
+"$bs" start --log-dir="$work/eq" --idle=1m --timeout=1h -- true >/dev/null 2>&1
 check "--opt=value form, m and h suffixes" $? 0
-"$bs" -l "$work/eq" -i 2s -t 0.5 -e x -F -- sh -c 'sleep 2' >/dev/null 2>&1
+"$bs" start -l "$work/eq" -i 2s -t 0.5 -e x -F -- sh -c 'sleep 2' >/dev/null 2>&1
 check "short options, s suffix, fractional seconds" $? 124
-"$bs" --log-dir "$work/eq" true >/dev/null 2>&1
+"$bs" start --log-dir "$work/eq" true >/dev/null 2>&1
 check "options end at the first non-option" $? 0
 
 finish

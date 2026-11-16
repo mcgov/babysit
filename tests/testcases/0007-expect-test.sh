@@ -26,15 +26,15 @@
 . "$(dirname "$0")/../lib.sh"
 
 t=$(date +%s)
-"$bs" --log-dir "$work/d" --expect '^ready$' -- sh -c 'echo boot; sleep 1; echo ready; sleep 2; echo done' >"$work/o4" 2>&1
+"$bs" start --log-dir "$work/d" --expect '^ready$' -- sh -c 'echo boot; sleep 1; echo ready; sleep 2; echo done' >"$work/o4" 2>&1
 check "--expect matched" $? 0
 check "--expect returns early" "$(quick "$t" 3)" y
 has "--expect echoes the line" "$work/o4" '^OUT: ready$'
 sleep 3
 has "expected command finished in background" "$(logof "$work/o4")" '^OUT: done$'
-"$bs" --log-dir "$work/d" --expect never -- sh -c 'echo x' >/dev/null 2>&1
+"$bs" start --log-dir "$work/d" --expect never -- sh -c 'echo x' >/dev/null 2>&1
 check "--expect without match, exit 0 -> 1" $? 1
-"$bs" --log-dir "$work/d" --fixed --expect '[::]:80' -- sh -c 'echo "on [::]:80"; sleep 1' >/dev/null 2>&1
+"$bs" start --log-dir "$work/d" --fixed --expect '[::]:80' -- sh -c 'echo "on [::]:80"; sleep 1' >/dev/null 2>&1
 check "--fixed matches literally" $? 0
 
 finish

@@ -23,7 +23,7 @@
 . "$(dirname "$0")/../lib.sh"
 
 t=$(date +%s)
-"$bs" --log-dir "$work/oh" -- sh -c '(sleep 2; echo late) & echo early' >"$work/h11" 2>/dev/null
+"$bs" start --log-dir "$work/oh" -- sh -c '(sleep 2; echo late) & echo early' >"$work/h11" 2>/dev/null
 check "exit is reported while a grandchild holds the pipes" "$?$(quick "$t" 2)" 0y
 sleep 3
 check "a grandchild's later output still reaches the log" \

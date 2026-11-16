@@ -11,14 +11,27 @@
  *
  * Prints "locked" or "unlocked" per file; exits 0 if all are unlocked,
  * 1 if any is locked, 2 on usage error.
+ *
+ * With --hold it plays the babysitter instead: it takes the writer lock on
+ * LOG and keeps it for SECONDS, so a test can have a "live" log in a
+ * directory of its choosing.
  */
 #include "../babysit.h"
 
 int main(int argc, char **argv) {
   int i, any = 0;
 
+  if (argc == 4 && strcmp(argv[1], "--hold") == 0) {
+    int fd = open(argv[3], O_RDWR);
+
+    if (fd < 0 || lock_byte(fd, LOCK_WRITER, F_WRLCK) < 0)
+      return 2;
+    sleep((unsigned)atoi(argv[2]));
+    return 0;
+  }
   if (argc < 2) {
-    fprintf(stderr, "usage: lockprobe LOG...\n");
+    fprintf(stderr, "usage: lockprobe LOG...\n"
+                    "       lockprobe --hold SECONDS LOG\n");
     return 2;
   }
   for (i = 1; i < argc; i++) {

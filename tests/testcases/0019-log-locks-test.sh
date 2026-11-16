@@ -28,13 +28,13 @@
 # shellcheck source=tests/lib.sh
 . "$(dirname "$0")/../lib.sh"
 
-"$bs" --log-dir "$work/lk" --detach -- sleep 2 >"$work/l1" 2>/dev/null
+"$bs" start --log-dir "$work/lk" --detach -- sleep 2 >"$work/l1" 2>/dev/null
 check "lock: held while the command runs, after babysit returned" "$("$lp" "$(logof "$work/l1")")" locked
 sleep 3
 check "lock: released when the command finishes" "$("$lp" "$(logof "$work/l1")")" unlocked
-"$bs" --log-dir "$work/lk" --detach -- sleep 30 >"$work/l2" 2>/dev/null
-"$bs" --log-dir "$work/lk" --detach -- sleep 2 >"$work/l3" 2>/dev/null
-cpid=$(basename "$(dirname "$(logof "$work/l2")")")
+"$bs" start --log-dir "$work/lk" --detach -- sleep 30 >"$work/l2" 2>/dev/null
+"$bs" start --log-dir "$work/lk" --detach -- sleep 2 >"$work/l3" 2>/dev/null
+cpid=$("$bs" info --log-dir "$work/lk" --pid "$(cat "$work/l2")")
 sitter=$(ps -o ppid= -p "$cpid" | tr -d ' ')
 kill -9 "$sitter"; sleep 0.3
 check "lock: released when the babysitter is killed" "$("$lp" "$(logof "$work/l2")")" unlocked

@@ -19,7 +19,7 @@
 # shellcheck source=tests/lib.sh
 . "$(dirname "$0")/../lib.sh"
 
-"$bs" --log-dir "$work/eq" -- sh -c 'exit 0' "it's" 'two
+"$bs" start --log-dir "$work/eq" -- sh -c 'exit 0' "it's" 'two
 lines' '' >"$work/h6" 2>/dev/null
 check "command line is shell-quoted on one line" "$(sed -n 1p "$(logof "$work/h6")")" \
     "sh -c 'exit 0' 'it'\\''s' 'two lines' ''"

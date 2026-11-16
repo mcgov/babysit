@@ -11,13 +11,12 @@
 #
 # Procedure:
 #   1. Start babysitd with a one-second check interval.
-#   2. Remove the whole log directory, then plant an earlier boot in a new
-#      one.
+#   2. Remove the whole log directory, then plant a past day in a new one.
 #   3. After the next pass, ask for another through the new request FIFO.
 #
 # Fails if:
 #   - the request FIFO or the lock file is not there again.
-#   - the first planted boot is not archived by the scheduled pass.
+#   - the planted day is not archived by the scheduled pass.
 #   - the request through the new FIFO is not heard.
 
 # shellcheck source=tests/lib.sh
@@ -28,12 +27,12 @@ d="$work/wp"
 sv=$!
 sleep 0.5
 rm -rf "$d"
-mkdir -p "$d/20220101-000000/0/1/2"; echo z >"$d/20220101-000000/0/1/2/log"
+plant "$d" 20220101/00/01/aaaa z
 sleep 2.5
 check "the request FIFO and the lock file are back" \
     "$([ -p "$d/.request" ] && [ -f "$d/.lock" ] && echo y)" y
 check "the scheduled pass works in the new directory" \
-    "$(ls "$d/archive" 2>/dev/null | tr '\n' ' ')" "babysit_logs_20220101-000000.tar.gz "
+    "$(ls "$d/archive" 2>/dev/null | tr '\n' ' ')" "babysit_logs_20220101.tar.gz "
 [ -p "$d/.request" ] && echo 1 >"$d/.request"
 sleep 0.5
 kill "$sv"; wait "$sv"

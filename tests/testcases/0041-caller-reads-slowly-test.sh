@@ -9,7 +9,7 @@
 #   look idle.
 #
 # Procedure:
-#   1. Pipe babysit --timeout 2 into a reader that sleeps for 8 seconds
+#   1. Pipe the stderr of babysit --timeout 2 into a reader that sleeps for 8 seconds
 #      before reading, for a command that writes far more than a pipe holds
 #      and then carries on.
 #   2. Do the same with --idle 2 and a reader that sleeps for 4 seconds, for
@@ -27,8 +27,8 @@
 
 t0=$(date +%s)
 {
-    "$bs" --log-dir "$work/sl" --timeout 2 -- \
-        sh -c 'yes | head -c 2000000; echo after the flood' 2>/dev/null
+    "$bs" start --log-dir "$work/sl" --timeout 2 -- \
+        sh -c 'yes | head -c 2000000; echo after the flood' 2>&1 >/dev/null
     echo "$? $(elapsed "$t0")" >"$work/sl.rc"
 } | { sleep 8; cat >/dev/null; }
 read -r rc took <"$work/sl.rc"
@@ -38,8 +38,8 @@ check "the command carried on and its later output is in the log" \
     "$(grep -c '^OUT: after the flood$' "$(find "$work/sl" -name log)")" 1
 
 {
-    "$bs" --log-dir "$work/sl2" --idle 2 -- \
-        sh -c 'yes | head -c 2000000; exit 7' 2>/dev/null
+    "$bs" start --log-dir "$work/sl2" --idle 2 -- \
+        sh -c 'yes | head -c 2000000; exit 7' 2>&1 >/dev/null
     echo "$?" >"$work/sl2.rc"
 } | { sleep 4; cat >/dev/null; }
 check "waiting for the reader is not counted as the command being idle" \

@@ -24,10 +24,10 @@
 . "$(dirname "$0")/../lib.sh"
 
 t=$(date +%s)
-: "$("$bs" --log-dir "$work/h" --idle 1 -- sh -c 'echo a; sleep 5' 2>/dev/null)"
+: "$("$bs" start --log-dir "$work/h" --idle 1 -- sh -c 'echo a; sleep 5' 2>&1)"
 check "pipe released after early return" "$(quick "$t" 4)" y
 t=$(date +%s)
-{ "$bs" --log-dir "$work/h" -- sleep 5 2>/dev/null & echo $! >"$work/pp"; } |
+{ "$bs" start --log-dir "$work/h" -- sleep 5 2>&1 & echo $! >"$work/pp"; } |
     { sleep 1; kill -9 "$(cat "$work/pp")"; cat >/dev/null; }
 check "pipe released when babysit is killed" "$(quick "$t" 4)" y
 
