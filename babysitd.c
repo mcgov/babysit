@@ -493,6 +493,11 @@ static void archive_old_boots(const char *current) {
     snprintf(out, sizeof out, "%s/babysit_logs_%s.tar.gz", adir, name);
     for (i = 2; stat(out, &sb) == 0 && i < 100; i++)
       snprintf(out, sizeof out, "%s/babysit_logs_%s.%d.tar.gz", adir, name, i);
+    if (stat(out, &sb) == 0) {
+      say(1, "every archive name for boot %s is taken; %s left in place", name,
+          from);
+      continue;
+    }
     snprintf(tmp, sizeof tmp, "%s.partial", out);
     if (pack(tmp, out, adir, logdir, name) < 0) {
       say(1, "could not archive %s (is tar installed?); left in place", from);

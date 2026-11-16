@@ -21,6 +21,8 @@
 #   - either current-boot log is gone.
 #   - the second archive overwrote the first instead of being named with
 #     ".2".
+#   - with every name up to ".99" taken, an existing archive is overwritten
+#     or the boot's directory is removed.
 
 # shellcheck source=tests/lib.sh
 . "$(dirname "$0")/../lib.sh"
@@ -42,5 +44,13 @@ mkdir -p "$work/d2/$oldboot/0/5/6"; echo again >"$work/d2/$oldboot/0/5/6/log"
 "$bsd" --once --log-dir "$work/d2" --config /dev/null 2>/dev/null
 check "babysitd: never overwrites an archive" \
     "$(ls "$work/d2/archive" | tr '\n' ' ')" "babysit_logs_$oldboot.2.tar.gz babysit_logs_$oldboot.tar.gz "
+
+for i in $(seq 3 99); do echo "kept $i" >"$work/d2/archive/babysit_logs_$oldboot.$i.tar.gz"; done
+mkdir -p "$work/d2/$oldboot/0/7/8"; echo third >"$work/d2/$oldboot/0/7/8/log"
+"$bsd" --once --log-dir "$work/d2" --config /dev/null 2>"$work/d2.err"
+check "babysitd: with every archive name taken, nothing is overwritten or removed" \
+    "$(cat "$work/d2/archive/babysit_logs_$oldboot.99.tar.gz" "$work/d2/$oldboot/0/7/8/log" | tr '\n' ' ')" \
+    "kept 99 third "
+has "babysitd: and it says so" "$work/d2.err" 'every archive name for boot'
 
 finish
