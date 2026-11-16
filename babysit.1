@@ -411,6 +411,18 @@ stdout or stderr open, but
 .B babysit
 knows nothing about how it fares.
 Run such programs in the foreground where they have an option for it.
+.SS "The babysitter can die"
+The babysitter is an ordinary process.
+If it is killed, by the out-of-memory killer for instance, logging stops, the
+log is left without its final
+.B "Process exited"
+or
+.B "Process killed"
+line, and the command, which is now writing to pipes nobody reads, is killed
+by SIGPIPE the next time it prints something, unless it ignores that signal.
+A
+.B babysit
+that was still waiting reports that it lost contact and returns 2.
 .SH EXAMPLES
 Start a server and return once it is listening:
 .PP
