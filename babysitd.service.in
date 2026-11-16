@@ -1,5 +1,5 @@
 [Unit]
-Description=Housekeeping for babysit logs (archive at boot, expire, pid rollover watch)
+Description=Housekeeping for babysit logs (archive past days, pack, expire)
 Documentation=man:babysitd(8) man:babysit(1)
 
 [Service]

@@ -28,7 +28,7 @@ expected line appears, when the command stops producing output, or after a
 timeout, and leaves the command running in every case.
 
 babysitd is an optional systemd user service that archives the logs of
-earlier boots, packs superseded log generations and expires old logs.
+past days, packs sooner when the disk fills up and expires old logs.
 
 %prep
 %autosetup

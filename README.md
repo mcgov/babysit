@@ -7,12 +7,15 @@ decide what to do about it: wait for a "ready" line, notice that it has gone
 quiet, or just let it run. Returning early never stops the command; it keeps
 running and its output keeps going to a log.
 
+`babysit start` prints one thing on stdout: an identifier for the run, such as
+`20261116/06/15/k3f9`. The command's output is echoed on stderr.
+
 ```sh
 # return once the server is listening (or after 30s), leave it running
-babysit --expect 'Listening on' --timeout 30 -- ./server --port 8080
+babysit start --expect 'Listening on' --timeout 30 -- ./server --port 8080
 
 # run a build, but come back if it prints nothing for two minutes
-babysit --idle 2m -- make -j8
+babysit start --idle 2m -- make -j8
 ```
 
 | Exit status | Meaning |
@@ -23,6 +26,7 @@ babysit --idle 2m -- make -j8
 | 124 | `--timeout` expired; command still running |
 | 125 | no output for `--idle` seconds; command still running |
 | 126 / 127 | command could not be executed / was not found |
+| 75 | the log directory holds records dated later than now; nothing started, try again (see below) |
 | 2 | usage or internal error |
 
 ## Example: waiting for a server that might never come up
@@ -39,34 +43,56 @@ If the server crashes or hangs before it prints that line, `tail -f` never
 ends and this waits forever. With `babysit`:
 
 ```sh
-babysit --expect 'Listening on' --idle 30s -- ./server --port 8080 &
-ppid=$!
-wait "$ppid"; rc=$?
-
-bbid=$(babysit --get-child-pid "$ppid")
-log=$(babysit --get-child-log "$ppid")
-
+# start always prints an identifier once there is an instance
+bbid=$(babysit start --expect 'Listening on' --timeout 30s -- ./server --port 8080)
+rc=$?
 case $rc in
-  0)   echo "server is up as bbid $bbid" ;;
-  125) echo "no output for 30s; bbid $bbid is still running, maybe stuck" ;;
-  *)   echo "server died during start-up (status $rc):"; tail -n 20 "$log" ;;
+  0)   echo "server is up" ;;
+  124) echo "no sign of life after 30s, stopping it" >&2
+       babysit signal TERM "$bbid"; exit $rc ;;
+  *)   echo "server died during start-up (status $rc)" >&2; exit $rc ;;
 esac
-tail -f "$log"
+
+# later: come back if it goes quiet for 30 seconds, and interrupt it then
+babysit watch "$bbid" --idle 30s --onfail INT --expect "$success_condition" || {
+    echo "success condition not seen and no output for 30s"
+}
+
+# is it still there?
+babysit check "$bbid" || echo "server is dead"
 ```
 
-`--get-child-pid` and `--get-child-log` take the pid of the `babysit` you
-started and print the command's pid and the path of its log. They print
-nothing and exit 1 if the command was never started (status 2, 126 or 127).
+| Command | What it does |
+|---|---|
+| `babysit start [options] -- command` | run a command, print its identifier |
+| `babysit watch ID [options]` | attach to a running instance and return as `start` would |
+| `babysit check ID` | exit 0 and print `running`, or exit 1 and print `exited N` |
+| `babysit info ID [--pid\|--log\|--exit-code]` | where the log is, the state, the pid while it runs |
+| `babysit signal SIGNAL ID` | have the babysitter signal the command |
 
-Each command is logged to
+When the command exits, its status is written to `exit_code` next to the
+log. A pid is only ever given out while the command is running, and
+`babysit signal` avoids needing one at all: the babysitter is the command's
+parent, so its signal cannot land on a process that has since been given
+the same pid.
 
-    ~/.local/var/log/babysit/<boot time>/<generation>/<babysit pid>/<command pid>/log
+Each run is logged to
 
-with stdout lines prefixed `OUT: ` and stderr lines prefixed `ERR: `. The
-path is printed as the first line of output.
+    ~/.local/var/log/babysit/<YYYYmmdd>/<HH>/<MM>/<salt>/log
+
+which is the log directory followed by the identifier, so a log can be
+opened straight from an identifier. Stdout lines are prefixed `OUT: ` and
+stderr lines `ERR: `. Dates are local time; set `timezone = utc` in
+`babysit.conf` when driving `babysit` from automation.
+
+If the clock is set back, the log directory holds records dated later than
+now. `babysit` then starts nothing and exits 75, which means "try again":
+`babysitd` packs those records away (run `babysitd --once` if the service is
+not running) and the retry goes through. See `babysit(1)`, WHEN THE CLOCK
+GOES BACKWARDS.
 
 `babysitd` is an optional systemd user service that archives the logs of
-earlier boots, packs superseded log generations and expires old logs.
+past days, packs sooner when the disk fills up, and expires old logs.
 
 Full documentation is in the man pages: `babysit(1)`, `babysitd(8)` and
 `babysit.conf(5)`.
@@ -87,8 +113,7 @@ WITHOUT SYSTEMD.
 ## Building
 
 clang/LLVM is the supported toolchain, with GNU make (`gmake` on the BSDs).
-The code is C99 and POSIX.1-2008, plus `sysctl` for the boot time on the
-BSDs and macOS and `/proc` files on Linux.
+The code is C99 and POSIX.1-2008.
 
 ```sh
 make                 # build bin/babysit and bin/babysitd

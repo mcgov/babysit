@@ -9,13 +9,39 @@ babysit.conf \- configuration for babysitd
 Settings for
 .BR babysitd (8).
 .BR babysit (1)
-does not read this file.
+reads it too, for
+.B timezone
+only.
 Each line is
 .IR key " = " value .
 Blank lines and lines starting with
 .B #
 are ignored.
 Unknown keys and bad values are reported and skipped.
+.TP
+.B timezone
+.B local
+or
+.BR utc :
+the clock by which
+.BR babysit (1)
+dates its instance identifiers and log directories, and by which
+.BR babysitd (8)
+decides which days and hours are over.
+Change it to
+.B utc
+when
+.B babysit
+is used with automation.
+Local time repeats an hour wherever clocks are set back in autumn, and for
+that hour
+.B babysit
+finds records dated later than now and refuses to start (exit status 75)
+until they are packed; UTC never does that.
+Do not change the setting while there are unpacked logs: the same thing
+happens for as many hours as the two clocks differ.
+Default:
+.BR local .
 .TP
 .B max_age_days
 Delete archived logs and finished logs older than this many days.
@@ -24,14 +50,14 @@ Default: 30.
 .TP
 .B compact_at_disk_percent
 When the filesystem holding the logs is at least this full, in percent,
-start a new log generation so that the logs written so far can be packed
-and compressed.
+also pack the finished hours of days that are not over yet, so that the
+logs written so far are compressed.
 0 disables.
 Default: 90.
 .TP
 .B delete_at_disk_percent
 When that filesystem is at least this full, in percent, delete packed logs
-(archives of earlier boots and packed generations of the current boot),
+(archives of past days and packed hours),
 oldest first, until it is not or none are left.
 Live log directories are never deleted.
 This is the only setting that removes logs before they reach
@@ -54,8 +80,8 @@ or
 .B d
 suffix (seconds if there is none).
 .BR babysit (1)
-wakes the service itself when it starts a new log generation, so this can
-stay long.
+wakes the service itself when it needs something packed before it can
+start, so this can stay long.
 Default: 6h.
 .PP
 Command-line options of
@@ -64,6 +90,7 @@ override this file.
 The file is read once, when the service starts.
 .SH EXAMPLE
 .nf
+timezone = utc
 max_age_days = 14
 compact_at_disk_percent = 80
 delete_at_disk_percent = 95

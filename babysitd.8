@@ -13,54 +13,56 @@ It does not poll: it sleeps for
 .B check_interval
 (6 hours by default), does the things below when it wakes, and goes
 back to sleep.
-.BR babysit (1)
-wakes it early when there is something to pack; see
+It can be woken early; see
 .BR "EARLY REQUESTS" .
-.TP
-.B Archive earlier boots
+.PP
 .B babysit
-files its logs under
-.IR LOGDIR / boot-time / ,
-one directory per boot.
-Every such directory other than the current boot's is packed, with
-whatever generations and packed generations it holds, into
+files the log of each instance under
+.IR LOGDIR / YYYYmmdd / HH / MM / salt /log ,
+by the minute it started in.
+.TP
+.B Archive past days
+Every day directory before today's, once nothing in it is being written, is
+packed into
 .PP
 .RS
 .RS
-.IR LOGDIR /archive/babysit_logs_ boot-time .tar.gz
+.IR LOGDIR /archive/babysit_logs_ YYYYmmdd .tar.gz
 .RE
 .RE
 .IP
-and then removed, so an archive is named after the boot its logs came from,
-not after the time it was made.
-The check is made on start and at every scheduled wake-up, so it does not
-matter how long after a reboot the service first runs.
-An existing archive is never overwritten; a second one for the same boot
+and then removed.
+The check is made on start and at every wake-up, so it does not matter
+when the service runs.
+An existing archive is never overwritten; a second one for the same day
 gets a
 .B .2
 before the extension.
 Archives are made with
 .BR tar (1);
 if that fails the directory is left in place and a warning is logged.
+.IP
+A day is archived whole.
+While one command started that day is still logging, its day directory
+stays, with the finished logs beside it.
 .TP
-.B Pack superseded generations
-Within a boot,
+.B Pack records dated later than now
+If the clock has been set back, the log directory holds records dated
+later than now, and
+.BR babysit (1)
+refuses to start anything while they are in the way (see
+.B "WHEN THE CLOCK GOES BACKWARDS"
+there).
+The service clears them: later days go to the archive like past ones, and
+within today each later hour, and each later minute of the current hour,
+is packed in place as
+.IB HH .tar.gz
+or
+.IB MM .tar.gz .
+One that is still being written is left, and
 .B babysit
-logs to
-.IR boot-time / N / ,
-and starts generation
-.IR N +1
-when a pid comes round again (see
-.BR "PID REUSE" " in " babysit (1)).
-Whenever it wakes, the service looks for generations of the current boot
-that are not the highest.
-Each one that has had no new log for two seconds and whose logs all lack a
-writer is replaced by
-.IR boot-time / N .tar.gz .
-A generation with a command still logging to it is left alone; only while
-one is waiting like this does the service look again every 30 seconds.
-Whether a log has a writer is decided by the write lock its babysitter
-holds, not by inspecting open file descriptors.
+goes on refusing until its command has finished or the clock has caught up
+with it.
 .TP
 .B Pack early when the disk fills up
 Whenever it wakes, the service checks how full the filesystem holding
@@ -68,16 +70,14 @@ Whenever it wakes, the service checks how full the filesystem holding
 is.
 At
 .B compact_at_disk_percent
-or more it starts a new generation itself, exactly as
-.B babysit
-would on a pid collision, so that the generation in use until then is packed
-and compressed as soon as its commands have finished.
-This is skipped while the current generation holds no logs, and done at most
-once every ten minutes, so a disk that is full of other things does not
-cause endless repacking.
+or more it does not wait for a day to be over: in the days that are still
+in place (today, and earlier days in which something is still being
+written) every hour that is over and has no writer is packed in place as
+.IR YYYYmmdd / HH .tar.gz .
 Packing compresses logs; it does not delete any.
 On a filesystem that simply stays above the limit, this means that at every
-wake-up the logs finished since the last one move into a tarball; see
+wake-up the logs of the hours finished since the last one move into
+tarballs; see
 .BR "READING PACKED LOGS" .
 .TP
 .B Delete under disk pressure
@@ -94,46 +94,44 @@ On those the reported usage can stay over the limit for a short time after
 a pass that deleted enough.
 Where snapshots keep deleted files alive, deleting frees nothing, and each
 pass will delete another batch for no gain; do not set this option there.
-The candidates are the archives of earlier boots and the packed generations
-of the current boot; a live log directory is never deleted, so a command
-that is still running, and a generation not yet packed, are safe.
+The candidates are the archives and the packed hours; a live log directory
+is never deleted, so a command that is still running, and logs not yet
+packed, are safe.
 Each deletion is logged as a warning.
 If usage is still over the limit once every packed log is gone, the rest of
 the space belongs to something else, and that is logged too.
 .TP
 .B Expire old logs
-Archives and packed generations whose file is older than
+Archives and packed hours whose file is older than
 .B max_age_days
-are deleted, as are finished logs of the current boot whose newest file is
-that old.
-This is done on start and at every scheduled wake-up.
-.TP
-.B Watch for pid rollover
-Whenever it wakes it reads the kernel's last allocated pid.
-If the value has gone down since the last look, the pid range has wrapped
-around and pids from this boot can now be reused; a warning is logged.
-With hours between looks this is a best-effort notice and can miss a
-wrap-around.
-Nothing else is done:
-.B babysit
-handles an actual collision itself (see
-.BR "PID REUSE" " in " babysit (1)).
+are deleted, as are finished logs that old which are still in a day
+directory because something else there is being written.
 .PP
-A log directory that still has a writer is never archived or deleted.
+A log that still has a writer is never archived or deleted, and neither is
+the day or hour directory around it.
 Any doubt counts as a writer: a log the service cannot open, and a log on
 a filesystem that cannot report locks (some network and FUSE filesystems),
-is left where it is, and so is the generation or boot directory around it.
+is left where it is.
 Such a directory is never packed or expired by the service.
+Nothing created in the last two seconds is packed either, so that an
+instance which has made its directory but not yet opened its log does not
+find it gone.
+.PP
+"Today" and "this hour" are reckoned in local time, or in UTC if
+.BR babysit.conf (5)
+says
+.BR "timezone = utc" ,
+the same setting
+.BR babysit (1)
+names its directories by.
 .PP
 The service only ever packs or deletes what
 .BR babysit (1)
-and it created: directories named like a boot
-.RI ( YYYYmmdd-HHMMSS
-or
-.BR unknown-boot ),
-the numbered generations and
-.IB N .tar.gz
-files inside the current one, and
+and it created: directories named like a day
+.RI ( YYYYmmdd ),
+the two-digit hour and minute directories and
+.IB NN .tar.gz
+files inside them, and
 .BI babysit_logs_ * .tar.gz
 files in
 .IR LOGDIR /archive .
@@ -202,14 +200,11 @@ from the configuration file.
 0 disables.
 Default: 0.
 .TP
-.BI "\-\-last\-pid\-file " FILE
-File holding the last allocated pid.
-Default:
-.IR /proc/sys/kernel/ns_last_pid .
-.TP
 .B \-1, \-\-once
-Archive and expire once, then exit.
-Useful from a shutdown hook or by hand.
+Do the housekeeping once, then exit.
+Useful from cron, or by hand when
+.BR babysit (1)
+has exited with status 75.
 .TP
 .B \-V, \-\-version
 Show the version.
@@ -229,35 +224,34 @@ not
 .SH READING PACKED LOGS
 Packed logs keep their paths inside the tarball, relative to the directory
 the tarball is in.
-To list what a packed generation or an archive holds, and to print one log
+To list what an archive or a packed hour holds, and to print one log
 without unpacking the rest:
 .PP
 .RS
 .nf
-tar \-tzf $LOGDIR/\fIboot-time\fP/0.tar.gz
-tar \-xzOf $LOGDIR/\fIboot-time\fP/0.tar.gz 0/\fIbabysit-pid\fP/\fIchild-pid\fP/log
-tar \-tzf $LOGDIR/archive/babysit_logs_\fIboot-time\fP.tar.gz
+tar \-tzf  $LOGDIR/archive/babysit_logs_20261116.tar.gz
+tar \-xzOf $LOGDIR/archive/babysit_logs_20261116.tar.gz 20261116/06/15/k3f9/log
+tar \-xzOf $LOGDIR/20261116/06.tar.gz 06/15/k3f9/log
 .fi
 .RE
 .PP
-.B "babysit \-\-get\-child\-log"
-does not look inside tarballs.
+An archived day may itself contain packed hours.
+.PP
+The
+.BR babysit (1)
+commands that take an identifier do not look inside tarballs.
 .SH EARLY REQUESTS
 The service listens on the FIFO
 .IR LOGDIR /.request .
-When
+A byte written there wakes it at once for its whole housekeeping pass,
+exactly as at a scheduled wake-up.
 .BR babysit (1)
-starts a new log generation it writes one byte there, and the service wakes
-at once and does its whole housekeeping pass, exactly as at a scheduled
-wake-up.
-That packs the generation that was just superseded (after the two-second
-quiet period, and once its commands have finished).
+writes one when it refuses to start because of records dated later than
+now, so that a retry finds them packed.
 .PP
 The write never blocks and its failure is ignored, so
 .B babysit
 behaves the same whether or not the service is running.
-If it is not, the superseded generation is simply packed the next time the
-service starts.
 Anything may wake the service the same way, which is also how to test it:
 lay out a log directory by hand, then
 .PP
@@ -313,7 +307,7 @@ reports the error.
 The log directory can be emptied, or removed altogether, while the service
 is running.
 At its next pass it creates the directory, its lock file and the request
-FIFO again and works out the current boot's directory afresh.
+FIFO again.
 Until that pass nothing listens for early requests.
 .SH INSTALLATION
 .RS
@@ -326,8 +320,8 @@ systemctl \-\-user enable \-\-now babysitd
 A user service starts when the user's systemd instance starts, which is at
 first login unless lingering is enabled
 .RB ( "loginctl enable\-linger" ).
-Because each boot logs to its own directory, a late start loses nothing:
-the earlier boot's logs are still there, untouched, to be archived.
+A late start loses nothing: the logs of past days are still there,
+untouched, to be archived.
 .SH WITHOUT SYSTEMD
 .B babysitd
 does not depend on systemd; the unit file is only a convenient way to start
@@ -351,28 +345,13 @@ Or with no long-running process at all, as a periodic one-shot:
 0 */6 * * * /usr/local/bin/babysitd \-\-once
 .RE
 .PP
-In the second form nothing listens on the request FIFO, so a superseded
-generation is packed at the next run instead of at once.
-Nothing is lost either way:
+In the second form nothing listens on the request FIFO, so a
 .BR babysit (1)
-never depends on the service.
+that has exited with status 75 is not helped until the next run; run
+.B "babysitd \-\-once"
+by hand to help it sooner.
+Nothing is lost either way.
 .SH PORTABILITY
-Boots are told apart by the kernel's boot id on Linux and by the boot time
-(from
-.BR sysctl (3))
-on the BSDs and macOS.
-On a system that offers neither,
-.B babysit
-logs everything under
-.IR LOGDIR /unknown-boot ,
-which is always treated as the current boot and so is never archived.
-.PP
-The last allocated pid is read from
-.I /proc/sys/kernel/ns_last_pid
-on Linux and from
-.B kern.lastpid
-on FreeBSD; elsewhere the rollover watch is switched off with a notice.
-.PP
 Linux and FreeBSD are the supported systems.
 macOS and the other BSDs are best effort and are not tested.
 .SH SEE ALSO
