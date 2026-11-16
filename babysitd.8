@@ -277,6 +277,12 @@ A command whose log cannot be created because the disk is full is not
 started, and
 .B babysit
 reports the error.
+.PP
+The log directory can be emptied, or removed altogether, while the service
+is running.
+At its next pass it creates the directory, its lock file and the request
+FIFO again and works out the current boot's directory afresh.
+Until that pass nothing listens for early requests.
 .SH INSTALLATION
 .RS
 .nf

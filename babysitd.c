@@ -106,12 +106,42 @@ static int pass_lock(short type, int cmd) {
   return fcntl(pass_fd, cmd, &fl);
 }
 
-/* Returns -1 if the lock could not be taken; the pass must then be skipped. */
+/* Is FD still the file that PATH names? */
+static int still_at(int fd, const char *path) {
+  struct stat a, b;
+
+  return fd >= 0 && stat(path, &a) == 0 && fstat(fd, &b) == 0 &&
+         a.st_dev == b.st_dev && a.st_ino == b.st_ino;
+}
+
+/*
+ * Returns -1 if the lock could not be taken; the pass must then be skipped.
+ *
+ * The log directory can be emptied or replaced under a running service. A
+ * lock on a file that is no longer there excludes nobody, so the lock file
+ * is opened again, and the directory created again, whenever that happens.
+ */
 static int pass_begin(void) {
-  while (pass_lock(F_WRLCK, F_SETLKW) < 0)
-    if (errno != EINTR || stop)
-      return -1;
-  return 0;
+  char path[PATH_BUF + 16];
+
+  snprintf(path, sizeof path, "%s/.lock", logdir);
+  for (;;) {
+    if (pass_fd < 0) {
+      if (mkdirs(logdir) < 0)
+        return -1;
+      pass_fd = open(path, O_RDWR | O_CREAT, 0600);
+      if (pass_fd < 0)
+        return -1;
+      fcntl(pass_fd, F_SETFD, FD_CLOEXEC);
+    }
+    while (pass_lock(F_WRLCK, F_SETLKW) < 0)
+      if (errno != EINTR || stop)
+        return -1;
+    if (still_at(pass_fd, path))
+      return 0;
+    close(pass_fd); /* which also drops the lock */
+    pass_fd = -1;
+  }
 }
 
 static void pass_end(void) { pass_lock(F_UNLCK, F_SETLK); }
@@ -175,6 +205,59 @@ static void say(int warning, const char *fmt, ...) {
   va_end(ap);
   fputc('\n', stderr);
   fflush(stderr);
+}
+
+/*
+ * The request FIFO. babysit writes a byte to it when it starts a new
+ * generation. Holding a write end ourselves keeps the read end from
+ * reporting hang-up, and lets the signal handler wake poll().
+ *
+ * Called at the start of every pass: if the FIFO has been removed along
+ * with the rest of the log directory, the one we hold is unreachable and a
+ * new one is made.
+ */
+static int req_fd = -1;
+
+static void open_request_fifo(void) {
+  static int warned;
+  char path[PATH_BUF + 16];
+  struct stat sb;
+  int r, w;
+
+  snprintf(path, sizeof path, "%s/%s", logdir, REQUEST_FIFO);
+  if (still_at(req_fd, path))
+    return;
+  w = wake_fd;
+  wake_fd = -1; /* before closing it: the signal handler writes to it */
+  if (w >= 0)
+    close(w);
+  if (req_fd >= 0)
+    close(req_fd);
+  req_fd = -1;
+  if (mkfifo(path, 0600) < 0 && errno != EEXIST && !warned)
+    say(1, "cannot create %s: %s", path, strerror(errno));
+  r = open(path, O_RDONLY | O_NONBLOCK);
+  if (r >= 0 && (fstat(r, &sb) < 0 || !S_ISFIFO(sb.st_mode))) {
+    close(r); /* something else has that name; reading it would never block */
+    r = -1;
+  }
+  w = r >= 0 ? open(path, O_WRONLY | O_NONBLOCK) : -1;
+  if (r < 0 || w < 0) {
+    if (!warned)
+      say(1,
+          "%s is not usable; babysit cannot ask for early packing, "
+          "which will wait for the next scheduled check",
+          path);
+    warned = 1;
+    if (r >= 0)
+      close(r);
+    return;
+  }
+  warned = 0;
+  fcntl(r, F_SETFD, FD_CLOEXEC);
+  fcntl(w, F_SETFD, FD_CLOEXEC);
+  req_fd = r;
+  wake_fd = w;
 }
 
 /*
@@ -821,7 +904,7 @@ int main(int argc, char **argv) {
   char tmp[PATH_BUF + 64];
   long max_age = 30, interval_s = 6L * 3600, disk_pct = 90, delete_pct = 0;
   long last = -1, cur;
-  int once = 0, i, n, pid_watch = 1, again, rfd, wfd;
+  int once = 0, i, n, pid_watch = 1, again;
   time_t next_full, now;
   struct sigaction sa;
 
@@ -921,15 +1004,9 @@ int main(int argc, char **argv) {
     return EXIT_USAGE;
   }
 
-  snprintf(tmp, sizeof tmp, "%s/.lock", logdir);
-  pass_fd = open(tmp, O_RDWR | O_CREAT, 0600);
-  if (pass_fd < 0) {
-    fprintf(stderr, "babysitd: cannot open %s: %s\n", tmp, strerror(errno));
-    return EXIT_USAGE;
-  }
-  fcntl(pass_fd, F_SETFD, FD_CLOEXEC);
   if (pass_begin() < 0) {
-    fprintf(stderr, "babysitd: cannot lock %s: %s\n", tmp, strerror(errno));
+    fprintf(stderr, "babysitd: cannot lock %s/.lock: %s\n", logdir,
+            strerror(errno));
     return EXIT_USAGE;
   }
 
@@ -953,20 +1030,7 @@ int main(int argc, char **argv) {
     pid_watch = 0;
   }
 
-  /* babysit writes a byte here when it starts a new generation. Holding
-   * a write end ourselves keeps the read end from reporting hang-up. */
-  snprintf(tmp, sizeof tmp, "%s/%s", logdir, REQUEST_FIFO);
-  if (mkfifo(tmp, 0600) < 0 && errno != EEXIST)
-    say(1, "cannot create %s: %s", tmp, strerror(errno));
-  rfd = open(tmp, O_RDONLY | O_NONBLOCK);
-  wfd = rfd >= 0 ? open(tmp, O_WRONLY | O_NONBLOCK) : -1;
-  if (rfd < 0 || wfd < 0)
-    say(1,
-        "%s is not usable; babysit cannot ask for early packing, "
-        "which will wait for the next scheduled check",
-        tmp);
-
-  wake_fd = wfd;
+  open_request_fifo();
   memset(&sa, 0, sizeof sa);
   sa.sa_handler = on_stop; /* no SA_RESTART: poll() must be interrupted */
   sigemptyset(&sa.sa_mask);
@@ -983,7 +1047,7 @@ int main(int argc, char **argv) {
     wait_s = next_full > now ? (long long)(next_full - now) : 0;
     if (again > 0 && again < wait_s)
       wait_s = again; /* a generation is waiting for its writers */
-    p.fd = rfd;
+    p.fd = req_fd;
     p.events = POLLIN;
     p.revents = 0;
     n = poll(&p, 1, wait_s > INT_MAX / 1000 ? INT_MAX : (int)wait_s * 1000);
@@ -993,10 +1057,12 @@ int main(int argc, char **argv) {
       sleep(1); /* never spin */
     if (n > 0) {
       char junk[64];
-      while (read(rfd, junk, sizeof junk) > 0)
+      while (read(req_fd, junk, sizeof junk) > 0)
         requested = 1;
-      if (!requested) /* error on the FIFO: stop listening to it */
-        rfd = -1;
+      if (!requested) { /* error on the FIFO: stop listening to it */
+        close(req_fd);
+        req_fd = -1;
+      }
     }
     now = time(NULL);
     full = now >= next_full;
@@ -1013,6 +1079,13 @@ int main(int argc, char **argv) {
       next_full = now + interval_s;
       continue;
     }
+    /* The log directory may have been emptied since the last pass, and
+     * babysit may have named this boot's directory afresh since then. */
+    open_request_fifo();
+    snprintf(tmp, sizeof tmp, "%s", boot);
+    current_boot(logdir, boot, sizeof boot);
+    if (strcmp(tmp, boot) != 0)
+      say(0, "the current boot's logs are now under %s (was %s)", boot, tmp);
     if (pid_watch && read_last_pid(last_pid_file, &cur) == 0) {
       if (cur < last)
         say(1,
