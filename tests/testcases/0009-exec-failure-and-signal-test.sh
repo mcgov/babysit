@@ -16,6 +16,8 @@
 # Fails if:
 #   - the statuses are not 127, 126 and 137.
 #   - a log file mentioning the non-executable command exists afterwards.
+#   - the failed runs leave directories behind: only the command that did
+#     run may have one.
 
 # shellcheck source=tests/lib.sh
 . "$(dirname "$0")/../lib.sh"
@@ -28,5 +30,7 @@ check "signal death is 128+sig" $? 137
 "$bs" --log-dir "$work/f" -- "$work/noexec" >/dev/null 2>&1
 check "non-executable command exits 126" $? 126
 check "failed exec leaves no log" "$(find "$work/f" -name log -exec grep -l noexec {} + | count)" 0
+check "failed exec leaves no directories either" \
+    "$(find "$work/f/$stamp/0" -mindepth 1 -maxdepth 1 -type d | count)" 1
 
 finish

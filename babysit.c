@@ -569,7 +569,13 @@ static void babysitter(const char *logdir, const char *base, long parent_pid,
   }
   close(go[1]);
   if (read(xp[0], &e, sizeof e) == (ssize_t)sizeof e) {
+    /* Nothing ran: leave no log, and no directories either, which a
+     * later babysit would take for pids already used in this generation. */
     unlink(path);
+    for (n = 0; n < 2; n++) {
+      *strrchr(path, '/') = '\0';
+      rmdir(path);
+    }
     send_msg(MSG_ERR_EXEC, e);
     leave(1);
   }
