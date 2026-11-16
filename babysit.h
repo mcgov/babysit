@@ -321,7 +321,16 @@ static inline int lock_log(int fd) {
   return fcntl(fd, F_SETLK, &fl);
 }
 
-/* 1 if another process holds the writer lock on this log, else 0. */
+/* Did the last open()/opendir() fail because there is nothing there? */
+static inline int is_absent(int err) { return err == ENOENT || err == ENOTDIR; }
+
+/*
+ * 1 if another process holds the writer lock on this log, else 0.
+ *
+ * The callers pack and delete what has no writer, so every doubt counts as
+ * a writer: a log that cannot be opened, or a filesystem that cannot say
+ * who holds a lock, is left alone. Only a log that is not there has none.
+ */
 static inline int log_has_writer(const char *path) {
   struct flock fl;
   int fd, busy = 0;
@@ -330,11 +339,11 @@ static inline int log_has_writer(const char *path) {
   if (fd < 0)
     fd = open(path, O_RDONLY);
   if (fd < 0)
-    return 0;
+    return !is_absent(errno);
   memset(&fl, 0, sizeof fl);
   fl.l_type = F_WRLCK;
   fl.l_whence = SEEK_SET;
-  if (fcntl(fd, F_GETLK, &fl) == 0 && fl.l_type != F_UNLCK)
+  if (fcntl(fd, F_GETLK, &fl) < 0 || fl.l_type != F_UNLCK)
     busy = 1;
   close(fd);
   return busy;
@@ -348,13 +357,12 @@ static inline int ppid_dir_has_writer(const char *dir) {
   int busy = 0, n;
 
   if (!d)
-    return 0;
+    return !is_absent(errno);
   while (!busy && (de = readdir(d)) != NULL) {
     if (!is_pid_name(de->d_name))
       continue;
     n = snprintf(path, sizeof path, "%s/%s/log", dir, de->d_name);
-    if (n > 0 && (size_t)n < sizeof path)
-      busy = log_has_writer(path);
+    busy = (n > 0 && (size_t)n < sizeof path) ? log_has_writer(path) : 1;
   }
   closedir(d);
   return busy;
@@ -368,13 +376,12 @@ static inline int gen_dir_has_writer(const char *gendir) {
   int busy = 0, n;
 
   if (!d)
-    return 0;
+    return !is_absent(errno);
   while (!busy && (de = readdir(d)) != NULL) {
     if (!is_pid_name(de->d_name))
       continue;
     n = snprintf(path, sizeof path, "%s/%s", gendir, de->d_name);
-    if (n > 0 && (size_t)n < sizeof path)
-      busy = ppid_dir_has_writer(path);
+    busy = (n > 0 && (size_t)n < sizeof path) ? ppid_dir_has_writer(path) : 1;
   }
   closedir(d);
   return busy;

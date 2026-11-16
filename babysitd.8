@@ -110,6 +110,10 @@ handles an actual collision itself (see
 .BR "PID REUSE" " in " babysit (1)).
 .PP
 A log directory that still has a writer is never archived or deleted.
+Any doubt counts as a writer: a log the service cannot open, and a log on
+a filesystem that cannot report locks (some network and FUSE filesystems),
+is left where it is, and so is the generation or boot directory around it.
+Such a directory is never packed or expired by the service.
 .PP
 The service only ever packs or deletes what
 .BR babysit (1)

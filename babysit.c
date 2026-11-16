@@ -416,9 +416,9 @@ static void babysitter(const char *logdir, const char *base, long parent_pid,
   static struct lstream out, err;
   struct sigaction sa;
   struct pollfd p[4];
-  char path[PATH_BUF], line[128];
+  char path[PATH_BUF], line[256];
   int op[2], ep[2], go[2], xp[2];
-  int devnull, e, n, status = 0, reaped = 0;
+  int devnull, e, n, status = 0, reaped = 0, lock_err = 0;
   long long start;
   long gen;
   int bumped = 0;
@@ -512,7 +512,9 @@ static void babysitter(const char *logdir, const char *base, long parent_pid,
     log_fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_APPEND, 0644);
   }
   if (log_fd >= 0) {
-    lock_log(log_fd); /* marks the log as having an active writer */
+    /* The lock marks the log as having an active writer. */
+    if (lock_log(log_fd) < 0)
+      lock_err = errno;
     if (bumped)
       request_packing(logdir); /* don't wait for its next check */
   }
@@ -542,6 +544,13 @@ static void babysitter(const char *logdir, const char *base, long parent_pid,
   n = snprintf(line, sizeof line, "\nProcess created with pid %ld\n",
                (long)child);
   emit(line, (size_t)n);
+  if (lock_err) {
+    n = snprintf(line, sizeof line,
+                 "babysit: warning: cannot lock this log (%s); babysitd "
+                 "cannot tell that it is still being written\n",
+                 strerror(lock_err));
+    emit(line, (size_t)n);
+  }
   if (detach)
     release(MSG_DETACHED, 0);
 

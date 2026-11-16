@@ -309,7 +309,7 @@ static int boot_dir_has_writer(const char *bootdir) {
   int busy = 0;
 
   if (!d)
-    return 0;
+    return !is_absent(errno);
   while (!busy && (de = readdir(d)) != NULL) {
     if (!is_pid_name(de->d_name))
       continue;
