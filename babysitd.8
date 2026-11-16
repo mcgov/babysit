@@ -111,6 +111,16 @@ handles an actual collision itself (see
 .PP
 A log directory that still has a writer is never archived or deleted.
 .PP
+Only one
+.B babysitd
+works on a log directory at a time.
+Each pass is made holding a lock on
+.IR LOGDIR /.lock ,
+so a second instance, such as a
+.B \-\-once
+run by hand or from cron while the service is running, waits for the pass in
+progress to finish and then makes its own.
+.PP
 Messages go to stderr, which under systemd is the journal:
 .PP
 .RS

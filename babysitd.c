@@ -47,6 +47,11 @@
  * attempt is not repeated for a while. Leftover .partial files from a
  * crashed run are removed on start.
  *
+ * Only one babysitd works on a log directory at a time. Each pass is done
+ * holding a write lock on <log-dir>/.lock, so a second instance (a
+ * "babysitd --once" run by hand or from cron next to the service, say)
+ * waits for the first to finish instead of packing the same directory.
+ *
  * The last pid comes from a Linux /proc file or FreeBSD's kern.lastpid;
  * where neither exists the rollover watch is switched off and the rest
  * still works. Archives are made by running tar(1).
@@ -81,6 +86,32 @@ static void on_stop(int sig) {
   }
   errno = saved;
 }
+
+/*
+ * Housekeeping passes of different babysitd processes must not overlap:
+ * two of them packing the same directory would each remove what the other
+ * is reading. pass_begin() waits for the other one to finish.
+ */
+static int pass_fd = -1; /* <log-dir>/.lock */
+
+static int pass_lock(short type, int cmd) {
+  struct flock fl;
+
+  memset(&fl, 0, sizeof fl);
+  fl.l_type = type;
+  fl.l_whence = SEEK_SET;
+  return fcntl(pass_fd, cmd, &fl);
+}
+
+/* Returns -1 if the lock could not be taken; the pass must then be skipped. */
+static int pass_begin(void) {
+  while (pass_lock(F_WRLCK, F_SETLKW) < 0)
+    if (errno != EINTR || stop)
+      return -1;
+  return 0;
+}
+
+static void pass_end(void) { pass_lock(F_UNLCK, F_SETLK); }
 
 static void usage(FILE *f) {
   fprintf(
@@ -761,6 +792,18 @@ int main(int argc, char **argv) {
     return EXIT_USAGE;
   }
 
+  snprintf(tmp, sizeof tmp, "%s/.lock", logdir);
+  pass_fd = open(tmp, O_RDWR | O_CREAT, 0600);
+  if (pass_fd < 0) {
+    fprintf(stderr, "babysitd: cannot open %s: %s\n", tmp, strerror(errno));
+    return EXIT_USAGE;
+  }
+  fcntl(pass_fd, F_SETFD, FD_CLOEXEC);
+  if (pass_begin() < 0) {
+    fprintf(stderr, "babysitd: cannot lock %s: %s\n", tmp, strerror(errno));
+    return EXIT_USAGE;
+  }
+
   current_boot(logdir, boot, sizeof boot);
   snprintf(tmp, sizeof tmp, "%s/archive", logdir);
   remove_partials(tmp);
@@ -771,6 +814,7 @@ int main(int argc, char **argv) {
   again = compact_generations(boot);
   clean_old(max_age, boot);
   free_disk(boot, delete_pct);
+  pass_end();
   if (once)
     return 0;
 
@@ -830,6 +874,15 @@ int main(int argc, char **argv) {
       continue;
     if (requested)
       say(0, "woken by a request on %s", REQUEST_FIFO);
+    if (pass_begin() < 0) {
+      if (stop)
+        break;
+      say(1, "cannot lock %s/.lock (%s); skipping this pass", logdir,
+          strerror(errno));
+      again = 0;
+      next_full = now + interval_s;
+      continue;
+    }
     if (pid_watch && read_last_pid(last_pid_file, &cur) == 0) {
       if (cur < last)
         say(1,
@@ -849,6 +902,7 @@ int main(int argc, char **argv) {
       clean_old(max_age, boot);
       free_disk(boot, delete_pct);
     }
+    pass_end();
     if (full)
       next_full = now + interval_s;
   }
