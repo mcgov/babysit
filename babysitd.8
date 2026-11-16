@@ -76,6 +76,9 @@ This is skipped while the current generation holds no logs, and done at most
 once every ten minutes, so a disk that is full of other things does not
 cause endless repacking.
 Packing compresses logs; it does not delete any.
+On a filesystem that simply stays above the limit, this means that at every
+wake-up the logs finished since the last one move into a tarball; see
+.BR "READING PACKED LOGS" .
 .TP
 .B Delete under disk pressure
 This is off unless
@@ -210,6 +213,22 @@ Useful from a shutdown hook or by hand.
 .TP
 .B \-h, \-\-help
 Show a summary of options.
+.SH READING PACKED LOGS
+Packed logs keep their paths inside the tarball, relative to the directory
+the tarball is in.
+To list what a packed generation or an archive holds, and to print one log
+without unpacking the rest:
+.PP
+.RS
+.nf
+tar \-tzf $LOGDIR/\fIboot-time\fP/0.tar.gz
+tar \-xzOf $LOGDIR/\fIboot-time\fP/0.tar.gz 0/\fIbabysit-pid\fP/\fIchild-pid\fP/log
+tar \-tzf $LOGDIR/archive/babysit_logs_\fIboot-time\fP.tar.gz
+.fi
+.RE
+.PP
+.B "babysit \-\-get\-child\-log"
+does not look inside tarballs.
 .SH EARLY REQUESTS
 The service listens on the FIFO
 .IR LOGDIR /.request .
