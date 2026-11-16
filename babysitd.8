@@ -81,9 +81,16 @@ Packing compresses logs; it does not delete any.
 This is off unless
 .B delete_at_disk_percent
 is set.
-When the filesystem is at least that full, the service deletes packed logs
-one at a time, oldest first, until usage is back under the limit or none are
-left.
+When the filesystem is at least that full, the service works out how much
+must go to bring usage back under the limit, and deletes packed logs one at
+a time, oldest first, until that much has gone or none are left.
+It goes by the sizes of the files it deletes and does not measure the
+filesystem again in between, because some filesystems (btrfs, ZFS) only
+give space back a while after a file is deleted.
+On those the reported usage can stay over the limit for a short time after
+a pass that deleted enough.
+Where snapshots keep deleted files alive, deleting frees nothing, and each
+pass will delete another batch for no gain; do not set this option there.
 The candidates are the archives of earlier boots and the packed generations
 of the current boot; a live log directory is never deleted, so a command
 that is still running, and a generation not yet packed, are safe.

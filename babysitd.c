@@ -24,9 +24,9 @@
  *      that the logs written so far can be packed (step 2) before the disk
  *      runs out.
  *   5. When that filesystem is at least delete_at_disk_percent full (off by
- *      default), it deletes packed logs, oldest first, until usage is back
- *      under the limit or none are left. Only tarballs are deleted: never a
- *      live log directory.
+ *      default), it deletes packed logs, oldest first, until enough has
+ *      gone to bring usage back under the limit or none are left. Only tarballs
+ * are deleted: never a live log directory.
  *   6. It watches the kernel's last-allocated pid and warns when it wraps
  *      around: from then on pids of this boot can be reused. babysit itself
  *      deals with an actual collision (see babysit(1), PID REUSE).
@@ -605,48 +605,81 @@ static void scan_tarballs(const char *dir, int (*is_ours)(const char *),
 }
 
 /*
+ * How many bytes must be freed for the log filesystem to be less than LIMIT
+ * percent full: 0 if it already is, -1 if that cannot be found out. *PCT
+ * is set to how full it is now.
+ */
+static long long disk_excess(long limit, int *pct) {
+  struct statvfs vfs;
+  unsigned long long used, total, allowed;
+
+  if (statvfs(logdir, &vfs) < 0)
+    return -1;
+  used = (unsigned long long)vfs.f_blocks - vfs.f_bfree;
+  total = used + vfs.f_bavail;
+  if (total == 0)
+    return -1;
+  *pct = (int)(((used * 100) + total - 1) / total);
+  if (*pct < limit)
+    return 0;
+  allowed = total * (unsigned long long)(limit - 1) / 100;
+  return (long long)((used - allowed) * vfs.f_frsize);
+}
+
+/*
  * Last resort when the disk is nearly full: delete packed logs, oldest
- * first, until usage is back under the limit or there are none left. The
- * candidates are the archives of earlier boots and the packed generations
- * of this boot. Live log directories are never touched, so a command that
- * is still running, or one nobody has had the chance to pack yet, is safe.
+ * first, until enough has gone to bring usage back under the limit or
+ * there are none left. The candidates are the archives of earlier boots
+ * and the packed generations of this boot. Live log directories are never
+ * touched, so a command that is still running, or one nobody has had the
+ * chance to pack yet, is safe.
+ *
+ * How much must go is worked out once, and the sizes of the deleted files
+ * are counted against it. Asking the filesystem again after each deletion
+ * would be simpler but is not safe: several filesystems (btrfs, ZFS) give
+ * space back some time after the unlink, or not at all while a snapshot
+ * holds the file, and every packed log would be gone before the number
+ * moved.
  */
 static void free_disk(const char *current, long limit) {
   char dir[PATH_BUF + 64], oldest[PATH_BUF + 700];
+  long long need, freed = 0;
   time_t oldest_time;
+  struct stat sb;
   long removed = 0;
-  int pct, first = -1;
+  int pct = 0;
 
   if (limit <= 0)
     return;
-  for (;;) {
-    pct = disk_used_percent();
-    if (pct < 0 || pct < limit)
-      break;
-    if (first < 0)
-      first = pct;
+  need = disk_excess(limit, &pct);
+  if (need <= 0)
+    return;
+  while (freed < need) {
     oldest[0] = '\0';
     oldest_time = 0;
     snprintf(dir, sizeof dir, "%s/archive", logdir);
     scan_tarballs(dir, is_archive_name, oldest, sizeof oldest, &oldest_time);
     snprintf(dir, sizeof dir, "%s/%s", logdir, current);
     scan_tarballs(dir, is_packed_gen_name, oldest, sizeof oldest, &oldest_time);
-    if (!oldest[0] || unlink(oldest) < 0)
+    if (!oldest[0] || stat(oldest, &sb) < 0 || unlink(oldest) < 0)
       break;
+    freed += (long long)sb.st_blocks * 512;
     removed++;
     say(1, "log filesystem is %d%% full (limit %ld%%): deleted %s", pct, limit,
         oldest);
   }
-  if (removed && pct >= limit)
+  if (freed >= need)
+    return;
+  if (removed)
     say(1,
         "log filesystem is still %d%% full after deleting every "
         "packed log; the rest of the space is not babysit's",
-        pct);
-  else if (first >= 0 && !removed)
+        disk_used_percent());
+  else
     say(1,
         "log filesystem is %d%% full (limit %ld%%) but there are no "
         "packed logs to delete",
-        first, limit);
+        pct, limit);
 }
 
 /*
