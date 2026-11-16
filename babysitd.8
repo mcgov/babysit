@@ -218,15 +218,53 @@ first login unless lingering is enabled
 .RB ( "loginctl enable\-linger" ).
 Because each boot logs to its own directory, a late start loses nothing:
 the earlier boot's logs are still there, untouched, to be archived.
+.SH WITHOUT SYSTEMD
+.B babysitd
+does not depend on systemd; the unit file is only a convenient way to start
+it.
+It is an ordinary foreground program that any supervisor can run as the user
+whose logs it looks after.
+On FreeBSD, other BSDs and macOS there are two ways to run it from that
+user's
+.BR crontab (1).
+.PP
+As a long-running process started at boot, which keeps early requests
+working:
+.PP
+.RS
+@reboot /usr/local/bin/babysitd
+.RE
+.PP
+Or with no long-running process at all, as a periodic one-shot:
+.PP
+.RS
+0 */6 * * * /usr/local/bin/babysitd \-\-once
+.RE
+.PP
+In the second form nothing listens on the request FIFO, so a superseded
+generation is packed at the next run instead of at once.
+Nothing is lost either way:
+.BR babysit (1)
+never depends on the service.
 .SH PORTABILITY
-The last allocated pid is read from a Linux
-.I /proc
-file; where it is missing the rollover watch is switched off with a notice.
-Where there is no kernel boot id,
+Boots are told apart by the kernel's boot id on Linux and by the boot time
+(from
+.BR sysctl (3))
+on the BSDs and macOS.
+On a system that offers neither,
 .B babysit
 logs everything under
 .IR LOGDIR /unknown-boot ,
 which is always treated as the current boot and so is never archived.
+.PP
+The last allocated pid is read from
+.I /proc/sys/kernel/ns_last_pid
+on Linux and from
+.B kern.lastpid
+on FreeBSD; elsewhere the rollover watch is switched off with a notice.
+.PP
+Linux and FreeBSD are the supported systems.
+macOS and the other BSDs are best effort and are not tested.
 .SH SEE ALSO
 .BR babysit (1),
 .BR babysit.conf (5)

@@ -26,12 +26,25 @@
  * logging. The kernel drops the lock when the babysitter exits, however it
  * exits, so "is the log locked" is a reliable "is it still being written".
  *
- * POSIX.1-2008 + XSI, C99.
+ * POSIX.1-2008 + XSI, C99; sysctl() for the boot time on the BSDs and macOS.
  */
 #ifndef BABYSIT_H
 #define BABYSIT_H
 
-#ifndef _XOPEN_SOURCE
+/*
+ * Feature-test macros. The BSDs and macOS expose POSIX plus their own
+ * sysctl() by default, and asking for strict POSIX would hide sysctl();
+ * everywhere else POSIX.1-2008 + XSI is requested explicitly.
+ */
+#if defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || \
+    defined(__DragonFly__)
+#define BABYSIT_HAVE_SYSCTL 1
+#elif defined(__APPLE__)
+#define BABYSIT_HAVE_SYSCTL 1
+#ifndef _DARWIN_C_SOURCE
+#define _DARWIN_C_SOURCE 1
+#endif
+#elif !defined(_XOPEN_SOURCE)
 #define _XOPEN_SOURCE 700
 #endif
 
@@ -51,6 +64,9 @@
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#ifdef BABYSIT_HAVE_SYSCTL
+#include <sys/sysctl.h>
+#endif
 
 #define BABYSIT_VERSION "0.1.0"
 
@@ -159,6 +175,15 @@ static inline int read_first_line(const char *path, char *buf, size_t n)
 /* Seconds since the epoch at which the system booted, or 0 if unknown. */
 static inline time_t boot_time(void)
 {
+#ifdef BABYSIT_HAVE_SYSCTL
+    int mib[2] = { CTL_KERN, KERN_BOOTTIME };
+    struct timeval tv;
+    size_t len = sizeof tv;
+
+    if (sysctl(mib, 2, &tv, &len, NULL, 0) == 0)
+        return tv.tv_sec;
+    return 0;
+#else
     char line[256];
     FILE *f = fopen("/proc/stat", "r");
     long long t = 0;
@@ -170,16 +195,51 @@ static inline time_t boot_time(void)
             break;
     fclose(f);
     return (time_t)t;
+#endif
+}
+
+/*
+ * Something that identifies the current boot: the kernel's random boot id
+ * on Linux, otherwise the boot time in seconds. Returns -1 if neither is
+ * available.
+ */
+static inline int boot_identity(char *id, size_t n)
+{
+    time_t bt;
+
+    if (read_first_line(BOOT_ID_FILE, id, n) == 0 && id[0])
+        return 0;
+    bt = boot_time();
+    if (bt == 0)
+        return -1;
+    snprintf(id, n, "%lld", (long long)bt);
+    return 0;
+}
+
+/*
+ * Do two boot identities name the same boot? A boot time can move a little
+ * when the clock is corrected, so two of those match within two minutes.
+ */
+static inline int same_boot(const char *a, const char *b)
+{
+    long long x, y;
+
+    if (is_pid_name(a) && is_pid_name(b)) {
+        x = atoll(a);
+        y = atoll(b);
+        return (x > y ? x - y : y - x) <= 120;
+    }
+    return strcmp(a, b) == 0;
 }
 
 /*
  * Name of the current boot's directory, as YYYYmmdd-HHMMSS.
  *
- * The kernel's idea of the boot time can shift by a second when the clock
- * is adjusted, so the name is worked out once per boot and remembered in
- * <log-dir>/.boot next to the kernel's boot id; later callers reuse it as
- * long as the boot id still matches. Without a boot id (not Linux) all logs
- * go under "unknown-boot" and are never archived.
+ * The kernel's idea of the boot time can shift when the clock is adjusted,
+ * so the name is worked out once per boot and remembered in <log-dir>/.boot
+ * next to the boot's identity; later callers reuse it as long as the
+ * identity still matches. Where the system offers no way to tell boots
+ * apart, all logs go under "unknown-boot" and are never archived.
  */
 static inline void current_boot(const char *logdir, char *stamp, size_t n)
 {
@@ -189,14 +249,14 @@ static inline void current_boot(const char *logdir, char *stamp, size_t n)
     time_t bt;
     FILE *f;
 
-    if (read_first_line(BOOT_ID_FILE, id, sizeof id) < 0 || !id[0]) {
+    if (boot_identity(id, sizeof id) < 0) {
         snprintf(stamp, n, "%s", UNKNOWN_BOOT);
         return;
     }
     snprintf(marker, sizeof marker, "%s/.boot", logdir);
     if (read_first_line(marker, line, sizeof line) == 0 &&
         sscanf(line, "%127s %31s", old_id, old_stamp) == 2 &&
-        strcmp(old_id, id) == 0) {
+        same_boot(old_id, id)) {
         snprintf(stamp, n, "%s", old_stamp);
         return;
     }

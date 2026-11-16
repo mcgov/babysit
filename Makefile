@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 # babysit - build, test, and package.
 #
-# clang/LLVM is the supported toolchain: the sanitizer and coverage targets
+# Needs GNU make (gmake on the BSDs). clang/LLVM is the supported toolchain: the sanitizer and coverage targets
 # use LLVM's runtimes and tools (llvm-profdata, llvm-cov).
 
 CC       = clang
@@ -10,9 +10,15 @@ PREFIX  ?= /usr/local
 BINDIR  ?= bin
 MANDIR  ?= $(PREFIX)/share/man
 DOCDIR  ?= $(PREFIX)/share/doc/babysit
-# systemd user units: $(PREFIX)/lib/systemd/user suits /usr and /usr/local;
-# for PREFIX=$$HOME/.local pass UNITDIR=$$HOME/.config/systemd/user.
+# systemd user units (Linux only): $(PREFIX)/lib/systemd/user suits /usr and
+# /usr/local; for PREFIX=$$HOME/.local pass UNITDIR=$$HOME/.config/systemd/user.
+# An empty UNITDIR installs no unit, which is the default off Linux.
+OS      := $(shell uname -s)
+ifeq ($(OS),Linux)
 UNITDIR ?= $(PREFIX)/lib/systemd/user
+else
+UNITDIR ?=
+endif
 
 VERSION := $(shell sed -n 's/^\#define BABYSIT_VERSION "\(.*\)"/\1/p' babysit.h)
 ARCH    := $(shell uname -m)
@@ -98,7 +104,7 @@ coverage:
 lint:
 	shellcheck --severity=warning tests/run.sh
 	@for m in $(MANPAGES); do \
-	    out=$$(man --warnings -l $$m 2>&1 >/dev/null); \
+	    out=$$(groff -man -Tutf8 -ww -z $$m 2>&1); \
 	    if [ -n "$$out" ]; then echo "$$m: $$out"; exit 1; fi; \
 	done; echo "man pages: ok"
 
@@ -106,13 +112,13 @@ lint:
 
 install: all
 	mkdir -p $(DESTDIR)$(PREFIX)/bin $(DESTDIR)$(MANDIR)/man1 \
-	    $(DESTDIR)$(MANDIR)/man5 $(DESTDIR)$(MANDIR)/man8 \
-	    $(DESTDIR)$(UNITDIR) $(DESTDIR)$(DOCDIR)
+	    $(DESTDIR)$(MANDIR)/man5 $(DESTDIR)$(MANDIR)/man8 $(DESTDIR)$(DOCDIR)
 	cp $(PROGS) $(DESTDIR)$(PREFIX)/bin/
 	cp babysit.1 $(DESTDIR)$(MANDIR)/man1/
 	cp babysit.conf.5 $(DESTDIR)$(MANDIR)/man5/
 	cp babysitd.8 $(DESTDIR)$(MANDIR)/man8/
-	cp $(BINDIR)/babysitd.service $(DESTDIR)$(UNITDIR)/
+	if [ -n "$(UNITDIR)" ]; then mkdir -p $(DESTDIR)$(UNITDIR) && \
+	    cp $(BINDIR)/babysitd.service $(DESTDIR)$(UNITDIR)/; fi
 	cp babysit.conf README.md LICENSE $(DESTDIR)$(DOCDIR)/
 
 # ---- packages ------------------------------------------------------------
@@ -151,8 +157,19 @@ deb: dist
 	tar -C $(BUILD)/deb -xzf $(BUILD)/babysit-$(VERSION).tar.gz
 	cd $(BUILD)/deb/babysit-$(VERSION) && dpkg-buildpackage -b -us -uc
 
+# build/babysit-VERSION.pkg, on FreeBSD (needs pkg; run with gmake)
+freebsd-pkg:
+	rm -rf $(BUILD)/pkg
+	$(MAKE) BINDIR=$(BUILD)/pkg/obj PREFIX=/usr/local UNITDIR= \
+	    DESTDIR=$(CURDIR)/$(BUILD)/pkg/stage install
+	sed 's/@VERSION@/$(VERSION)/' packaging/freebsd/manifest.in \
+	    > $(BUILD)/pkg/+MANIFEST
+	cd $(BUILD)/pkg/stage && find usr -type f | sed 's|^|/|' > ../plist
+	pkg create -M $(BUILD)/pkg/+MANIFEST -r $(BUILD)/pkg/stage \
+	    -p $(BUILD)/pkg/plist -o $(BUILD)
+
 clean:
 	rm -rf bin $(BUILD)
 
 .PHONY: all test check check-asan check-ubsan check-tsan coverage lint \
-        install dist bindist rpm deb clean
+        install dist bindist rpm deb freebsd-pkg clean

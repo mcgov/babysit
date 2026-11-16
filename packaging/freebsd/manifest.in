@@ -1,0 +1,19 @@
+name: babysit
+version: "@VERSION@"
+origin: sysutils/babysit
+comment: Run a command detached, log it, and return early if it stalls
+maintainer: matthew@mcgov.dev
+www: https://gitlab.com/mowws/babysit
+prefix: /usr/local
+licenselogic: single
+licenses: [MIT]
+categories: [sysutils]
+desc: <<EOD
+babysit runs a command in the background under a babysitter process, echoes
+its output and writes it to a per-process log. It returns early when an
+expected line appears, when the command stops producing output, or after a
+timeout, and leaves the command running in every case.
+
+babysitd does the housekeeping for those logs. See babysitd(8), section
+WITHOUT SYSTEMD, for how to run it from cron.
+EOD

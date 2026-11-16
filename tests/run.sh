@@ -50,6 +50,13 @@ has() { # description, file, pattern
     fi
 }
 logof() { sed -n 's/^Log file: //p' "$1"; }
+# touch -t stamp for N seconds ago (GNU date, then BSD date)
+ago() {
+    local t=$(( $(date +%s) - $1 ))
+    date -d "@$t" +%Y%m%d%H%M.%S 2>/dev/null || date -r "$t" +%Y%m%d%H%M.%S
+}
+old10d=$(ago 864000)
+old1m=$(ago 60)
 elapsed() { echo $(( $(date +%s) - $1 )); }
 quick() { [ "$(elapsed "$1")" -lt "$2" ] && echo y; }
 
@@ -227,9 +234,9 @@ check "lock: each log has its own" "$("$lp" "$(logof "$work/l3")")" locked
 kill "$cpid"
 check "lock: a missing log counts as unlocked" "$("$lp" "$work/lk/none")" unlocked
 "$bs" --log-dir "$work/lk2" --detach -- sleep 3 >"$work/l4" 2>/dev/null
-mkdir "$work/lk2/$stamp/1"; touch -d '1 minute ago' "$work/lk2/$stamp/0"
+mkdir "$work/lk2/$stamp/1"; touch -t "$old1m" "$work/lk2/$stamp/0"
 "$bsd" --once --log-dir "$work/lk2" --max-age-days 1 --config /dev/null 2>/dev/null
-find "$work/lk2/$stamp/0" -exec touch -d '10 days ago' {} + 2>/dev/null
+find "$work/lk2/$stamp/0" -exec touch -t "$old10d" {} + 2>/dev/null
 "$bsd" --once --log-dir "$work/lk2" --max-age-days 1 --config /dev/null 2>/dev/null
 check "lock: a locked log is neither packed nor expired" "$("$lp" "$(logof "$work/l4")")" locked
 sleep 3.5
@@ -302,8 +309,8 @@ mkdir -p "$work/k/20240101-000000/0/11/12" "$work/k/$stamp/0/21/22" "$work/k/$st
 echo earlier-boot >"$work/k/20240101-000000/0/11/12/log"
 echo superseded >"$work/k/$stamp/0/21/22/log"
 : >"$work/k/archive/babysit_logs_20200101-000000.tar.gz"
-touch -d '10 days ago' "$work/k/archive/babysit_logs_20200101-000000.tar.gz"
-touch -d '1 minute ago' "$work/k/$stamp/0"      # past the quiet period
+touch -t "$old10d" "$work/k/archive/babysit_logs_20200101-000000.tar.gz"
+touch -t "$old1m" "$work/k/$stamp/0"      # past the quiet period
 echo 1 >"$work/k/.request"
 sleep 2
 kill "$kd"; wait "$kd" 2>/dev/null
@@ -350,8 +357,8 @@ check "babysitd: never overwrites an archive" \
     "$(ls "$work/d2/archive" | tr '\n' ' ')" "babysit_logs_$oldboot.2.tar.gz babysit_logs_$oldboot.tar.gz "
 "$bsd" --once --log-dir "$work/d2" --max-age-days 5 --config /dev/null 2>/dev/null
 check "babysitd: keeps recent archives" "$(ls "$work/d2/archive" | wc -l)" 2
-touch -d '10 days ago' "$work/d2"/archive/* "$done_log" "$(dirname "$done_log")" "$(dirname "$(dirname "$done_log")")"
-find "$(dirname "$(dirname "$live")")" -exec touch -d '10 days ago' {} +
+touch -t "$old10d" "$work/d2"/archive/* "$done_log" "$(dirname "$done_log")" "$(dirname "$(dirname "$done_log")")"
+find "$(dirname "$(dirname "$live")")" -exec touch -t "$old10d" {} +
 printf 'max_age_days = 5\n' >"$work/conf"
 "$bsd" --once --log-dir "$work/d2" --config "$work/conf" 2>/dev/null
 check "babysitd: expires old archives (from config)" "$(ls "$work/d2/archive" | wc -l)" 0
@@ -426,7 +433,7 @@ check "babysitd: relative --log-dir is resolved against the cwd" "$([ -e "$work/
 mkdir -p "$work/tf/20230101-000000/0/1/2" "$work/tf/$stamp/0/3/4" "$work/tf/$stamp/1" "$work/tf/archive"
 echo a >"$work/tf/20230101-000000/0/1/2/log"; echo b >"$work/tf/$stamp/0/3/4/log"
 : >"$work/tf/$stamp/7.tar.gz.partial"; : >"$work/tf/archive/babysit_logs_x.tar.gz.partial"
-touch -d '1 minute ago' "$work/tf/$stamp/0"
+touch -t "$old1m" "$work/tf/$stamp/0"
 PATH=/nonexistent "$bsd" --once --log-dir "$work/tf" --config /dev/null 2>"$work/d7"
 check "tar missing: babysitd still exits 0" $? 0
 has "tar missing: earlier boot left in place, with a warning" "$work/d7" 'could not archive'

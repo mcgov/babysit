@@ -38,10 +38,23 @@ earlier boots, packs superseded log generations and expires old logs.
 Full documentation is in the man pages: `babysit(1)`, `babysitd(8)` and
 `babysit.conf(5)`.
 
+## Platforms
+
+| Platform | Status |
+|---|---|
+| Linux, x86_64 and aarch64 | supported; tested in CI |
+| FreeBSD, x86_64 and aarch64 | supported; CI needs a self-hosted runner |
+| macOS, other BSDs | best effort, untested |
+| Windows | experimental, under MSYS2 only; there is no native port |
+
+Without systemd, run `babysitd` from cron: see `babysitd(8)`, section
+WITHOUT SYSTEMD.
+
 ## Building
 
-clang/LLVM is the supported toolchain. The code is C99 and POSIX.1-2008;
-`babysitd` additionally uses Linux `/proc` files where they exist.
+clang/LLVM is the supported toolchain, with GNU make (`gmake` on the BSDs).
+The code is C99 and POSIX.1-2008, plus `sysctl` for the boot time on the
+BSDs and macOS and `/proc` files on Linux.
 
 ```sh
 make                 # build bin/babysit and bin/babysitd
@@ -68,6 +81,7 @@ make dist            # build/babysit-VERSION.tar.gz (source)
 make bindist         # build/babysit-VERSION-linux-ARCH.tar.gz
 make rpm             # needs rpmbuild
 make deb             # needs dpkg-buildpackage and debhelper
+gmake freebsd-pkg    # on FreeBSD; needs pkg
 ```
 
 The version is defined once, as `BABYSIT_VERSION` in `babysit.h`;

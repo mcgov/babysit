@@ -43,9 +43,9 @@
  * attempt is not repeated for a while. Leftover .partial files from a
  * crashed run are removed on start.
  *
- * The last pid comes from a Linux /proc file; where it does not exist the
- * rollover watch is switched off and the rest still works. Archives are
- * made by running tar(1).
+ * The last pid comes from a Linux /proc file or FreeBSD's kern.lastpid;
+ * where neither exists the rollover watch is switched off and the rest
+ * still works. Archives are made by running tar(1).
  */
 #include "babysit.h"
 #include <stdarg.h>
@@ -229,6 +229,32 @@ static void load_config(const char *path, int required, long *max_age,
             *disk_pct = v;
     }
     fclose(f);
+}
+
+/*
+ * The most recently allocated pid: from FILE if it can be read (Linux's
+ * ns_last_pid, or whatever --last-pid-file names), else from the kernel on
+ * FreeBSD. Returns -1 where there is no way to tell.
+ */
+static int read_last_pid(const char *file, long *out)
+{
+    char buf[64];
+
+    if (read_first_line(file, buf, sizeof buf) == 0 &&
+        parse_num(buf, out) == 0)
+        return 0;
+#ifdef __FreeBSD__
+    {
+        int pid;
+        size_t len = sizeof pid;
+
+        if (sysctlbyname("kern.lastpid", &pid, &len, NULL, 0) == 0) {
+            *out = pid;
+            return 0;
+        }
+    }
+#endif
+    return -1;
 }
 
 /* 1 if any log in any generation under <log-dir>/<boot> has a writer. */
@@ -549,7 +575,7 @@ int main(int argc, char **argv)
     const char *disk_opt = NULL;
     const char *last_pid_file = LAST_PID_FILE;
     const char *v;
-    char cfg[PATH_BUF], cwd[PATH_BUF], buf[64], boot[BOOT_STAMP_MAX];
+    char cfg[PATH_BUF], cwd[PATH_BUF], boot[BOOT_STAMP_MAX];
     char tmp[PATH_BUF + 64];
     long max_age = 30, interval_s = 6 * 3600, disk_pct = 90, last = -1, cur;
     int once = 0, i, n, pid_watch = 1, again, rfd, wfd;
@@ -659,8 +685,7 @@ int main(int argc, char **argv)
     if (once)
         return 0;
 
-    if (read_first_line(last_pid_file, buf, sizeof buf) < 0 ||
-        parse_num(buf, &last) < 0) {
+    if (read_last_pid(last_pid_file, &last) < 0) {
         say(0, "%s is not readable; pid rollover is not monitored",
             last_pid_file);
         pid_watch = 0;
@@ -715,8 +740,7 @@ int main(int argc, char **argv)
             continue;
         if (requested)
             say(0, "woken by a request on %s", REQUEST_FIFO);
-        if (pid_watch && read_first_line(last_pid_file, buf, sizeof buf) == 0 &&
-            parse_num(buf, &cur) == 0) {
+        if (pid_watch && read_last_pid(last_pid_file, &cur) == 0) {
             if (cur < last)
                 say(1, "pid rollover detected (last pid went from %ld to "
                     "%ld); pids from this boot can now be reused, and "
