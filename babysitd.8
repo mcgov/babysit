@@ -211,8 +211,21 @@ Default:
 Archive and expire once, then exit.
 Useful from a shutdown hook or by hand.
 .TP
+.B \-V, \-\-version
+Show the version.
+.TP
 .B \-h, \-\-help
 Show a summary of options.
+.PP
+Options that take a value accept it as the next argument, or after
+.B =
+in the long form.
+Short options cannot be combined or have the value attached:
+.B "\-a 14"
+and
+.BR \-\-max\-age\-days=14 ,
+not
+.BR \-a14 .
 .SH READING PACKED LOGS
 Packed logs keep their paths inside the tarball, relative to the directory
 the tarball is in.

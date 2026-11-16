@@ -101,6 +101,19 @@ Show the version.
 .B \-h, \-\-help
 Show a summary of options.
 .PP
+Options must come before the command.
+Those that take a value accept it as the next argument, or after
+.B =
+in the long form.
+Short options cannot be combined or have the value attached:
+.B "\-d \-t 30"
+and
+.BR \-\-timeout=30 ,
+not
+.B \-dt30
+or
+.BR \-t30 .
+.PP
 .I SECS
 may be fractional and may carry an
 .BR s ,
