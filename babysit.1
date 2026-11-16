@@ -235,6 +235,21 @@ directory and cannot collide with another.
 Within one boot a pid is reused only after the system has run through its
 whole pid range, which is rare but possible on a long-lived machine.
 .PP
+The pids in a log path are the ones
+.B babysit
+sees.
+A log directory should therefore belong to one host and one pid namespace.
+Shared between machines, as a home directory on a network filesystem may be,
+or between containers, each of which numbers its processes from 1 again,
+it sees the same pids over and over.
+Nothing is lost when that happens, because of what follows, but new
+generations are started far more often than "rare" suggests, each machine
+takes the other's boot directory for an earlier boot, and
+.B \-\-get\-child\-pid
+may answer with a pid from another machine.
+Give each one its own
+.BR \-\-log\-dir .
+.PP
 .B babysit
 never overwrites or deletes a log to make room.
 Within a boot, logs are filed in numbered
