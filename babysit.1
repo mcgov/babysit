@@ -423,6 +423,19 @@ by SIGPIPE the next time it prints something, unless it ignores that signal.
 A
 .B babysit
 that was still waiting reports that it lost contact and returns 2.
+.SS "Detached from the terminal, not from everything"
+The babysitter and the command leave the caller's session and terminal, so
+closing the terminal or killing the caller does not touch them.
+They stay in the caller's control group, though.
+Whatever tears that down takes them with it: systemd at logout when
+.B KillUserProcesses
+is set, a service manager stopping the unit that
+.B babysit
+was called from, a CI runner or container ending the job.
+To outlive those, start
+.B babysit
+from something that puts it in a group of its own, such as
+.BR "systemd\-run \-\-user \-\-scope" .
 .SH EXAMPLES
 Start a server and return once it is listening:
 .PP
