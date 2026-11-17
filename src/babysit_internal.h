@@ -50,7 +50,8 @@ enum {
   MSG_STALL,
   MSG_TIMEOUT,
   MSG_DETACHED,
-  MSG_WARN_LOG /* value: errno; the log could not be written. Not final. */
+  MSG_WARN_LOG, /* value: errno; the log could not be written. Not final. */
+  MSG_SEEN      /* value: how many --expect patterns were seen. Not final. */
 };
 
 struct msg {
@@ -83,10 +84,10 @@ struct look {
   int pid, log, code;
 };
 
-/* The --expect pattern, if any; set while the command line is read. */
-extern const char *expect_pat;
+/* The --expect patterns: how many were given, and how many of them have
+ * been seen so far. They are looked for in the order given. */
+extern int expect_n, expect_seen;
 extern int expect_fixed;
-extern regex_t expect_re;
 
 /* The babysitter's state. */
 extern int log_fd, status_fd;
@@ -107,6 +108,12 @@ int parse_interval(const char *s, long long *ms);
 char *join_cmdline(char **cmd);
 int resolve_logdir(const char *dir, char *logdir, size_t size);
 int parse_signal(const char *s);
+void expect_reset(void);
+int expect_add(const char *pat);
+int expect_compile(void);
+int expect_line(const char *line);
+const char *expect_unmet(void);
+const char *expect_sofar(void);
 int look_args(const char *name, int argc, char **argv, int watch, int info,
               struct look *o, const char **ops, int max);
 int load_timezone(const char *path, int required, int *utc);

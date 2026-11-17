@@ -62,15 +62,8 @@ int cmd_watch(int argc, char **argv) {
     fprintf(stderr, "babysit: unknown signal '%s'\n", o.onfail);
     return EXIT_USAGE;
   }
-  if (expect_pat && !expect_fixed) {
-    int rc = regcomp(&expect_re, expect_pat, REG_EXTENDED | REG_NOSUB);
-    if (rc != 0) {
-      char msg[256];
-      regerror(rc, &expect_re, msg, sizeof msg);
-      fprintf(stderr, "babysit: bad --expect pattern: %s\n", msg);
-      return EXIT_USAGE;
-    }
-  }
+  if (expect_compile() < 0)
+    return EXIT_USAGE;
   if (find_instance(o.dir, child_id, &in) < 0)
     return EXIT_USAGE;
   fd = open(in.log, O_RDONLY);
@@ -96,13 +89,11 @@ int cmd_watch(int argc, char **argv) {
           ssize_t w = write(1, line, n);
           (void)w;
         }
-        if (expect_pat && n > PREFIX_LEN &&
+        if (expect_n && n > PREFIX_LEN &&
             (memcmp(line, "OUT: ", PREFIX_LEN) == 0 ||
              memcmp(line, "ERR: ", PREFIX_LEN) == 0)) {
           *nl = '\0';
-          hit = expect_fixed
-                    ? strstr(line + PREFIX_LEN, expect_pat) != NULL
-                    : regexec(&expect_re, line + PREFIX_LEN, 0, NULL, 0) == 0;
+          hit = expect_line(line + PREFIX_LEN);
         }
         if (hit) {
           fprintf(stderr, "babysit: %s: expected output seen\n", child_id);
@@ -126,8 +117,8 @@ int cmd_watch(int argc, char **argv) {
         continue;
       }
       fprintf(stderr, "babysit: %s: exited with status %d%s\n", child_id, code,
-              expect_pat ? " before the expected output" : "");
-      return (expect_pat && code == 0) ? 1 : code;
+              expect_unmet());
+      return (expect_n && code == 0) ? 1 : code;
     }
     if (state == ST_LOST) {
       fprintf(stderr,
@@ -138,13 +129,14 @@ int cmd_watch(int argc, char **argv) {
     }
     now = now_ms();
     if (timeout_ms > 0 && now - start >= timeout_ms) {
-      fprintf(stderr, "babysit: %s: timed out after %s; still running\n",
-              child_id, o.timeout_s);
+      fprintf(stderr, "babysit: %s: timed out after %s; still running%s\n",
+              child_id, o.timeout_s, expect_sofar());
       return watch_fail(&in, child_id, o.onfail, sig, EXIT_TIMEOUT);
     }
     if (idle_ms > 0 && now - last >= idle_ms) {
-      fprintf(stderr, "babysit: %s: stalled: no output for %s; still running\n",
-              child_id, o.idle_s);
+      fprintf(stderr,
+              "babysit: %s: stalled: no output for %s; still running%s\n",
+              child_id, o.idle_s, expect_sofar());
       return watch_fail(&in, child_id, o.onfail, sig, EXIT_STALLED);
     }
     nanosleep(&tick, NULL);

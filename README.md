@@ -15,6 +15,10 @@ is read from the log, with `babysit cat`, `babysit watch` or `tail -f`.
 # return once the server is listening (or after 30s), leave it running
 babysit start --expect 'Listening on' --timeout 30 -- ./server --port 8080
 
+# several --expect: return once all have appeared, in this order
+babysit start --expect 'migrations applied' --expect 'Listening on' \
+    --timeout 60 -- ./server --port 8080
+
 # run a build, but come back if it prints nothing for two minutes
 babysit start --idle 2m -- make -j8
 ```
@@ -22,8 +26,8 @@ babysit start --idle 2m -- make -j8
 | Exit status | Meaning |
 |---|---|
 | *N* | the command exited with status *N* (128+signal if killed) |
-| 0 | `--expect` matched, or `--detach` |
-| 1 | `--expect` given, command exited 0 without a match |
+| 0 | `--expect` matched (every one, if several), or `--detach` |
+| 1 | `--expect` given, command exited 0 before it had matched |
 | 124 | `--timeout` expired; command still running |
 | 125 | no output for `--idle` seconds; command still running |
 | 126 / 127 | command could not be executed / was not found |

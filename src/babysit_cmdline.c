@@ -12,11 +12,118 @@
  */
 #include "babysit_internal.h"
 
-const char *expect_pat;
-
+/*
+ * The --expect patterns. Each --expect adds one, and they are looked for in
+ * the order given: the second only after the first has been seen, starting
+ * right after the text that matched the first, so two of them can be
+ * satisfied by one line. When the last has been seen, the caller returns.
+ */
+int expect_n, expect_seen;
 int expect_fixed;
+static const char **expect_pats;
+static regex_t *expect_res;
+static int expect_ncomp; /* how many of them are compiled */
 
-regex_t expect_re;
+/* Forget the patterns: a command line is about to be read. */
+void expect_reset(void) {
+  while (expect_ncomp > 0)
+    regfree(&expect_res[--expect_ncomp]);
+  free(expect_res);
+  free((void *)expect_pats);
+  expect_res = NULL;
+  expect_pats = NULL;
+  expect_n = expect_seen = expect_fixed = 0;
+}
+
+int expect_add(const char *pat) {
+  const char **p = (const char **)realloc((void *)expect_pats,
+                                          ((size_t)expect_n + 1) * sizeof *p);
+
+  if (!p) {
+    perror("babysit: malloc");
+    return -1;
+  }
+  expect_pats = p;
+  expect_pats[expect_n++] = pat;
+  return 0;
+}
+
+/* Once the command line is read. Returns -1 after complaining. */
+int expect_compile(void) {
+  if (expect_fixed || expect_n == 0)
+    return 0;
+  expect_res = malloc((size_t)expect_n * sizeof *expect_res);
+  if (!expect_res) {
+    perror("babysit: malloc");
+    return -1;
+  }
+  for (; expect_ncomp < expect_n; expect_ncomp++) {
+    int rc = regcomp(&expect_res[expect_ncomp], expect_pats[expect_ncomp],
+                     REG_EXTENDED);
+    if (rc != 0) {
+      char msg[256];
+      regerror(rc, &expect_res[expect_ncomp], msg, sizeof msg);
+      fprintf(stderr, "babysit: bad --expect pattern '%s': %s\n",
+              expect_pats[expect_ncomp], msg);
+      return -1;
+    }
+  }
+  return 0;
+}
+
+/*
+ * A line of the command's output, without its label. Returns 1 if with it
+ * every pattern has been seen. Each pattern is looked for from where the
+ * one before it ended.
+ */
+int expect_line(const char *line) {
+  size_t at = 0;
+
+  while (expect_seen < expect_n) {
+    if (expect_fixed) {
+      const char *pat = expect_pats[expect_seen];
+      const char *hit = strstr(line + at, pat);
+
+      if (!hit)
+        break;
+      at = (size_t)(hit - line) + strlen(pat);
+    } else {
+      regmatch_t m;
+
+      if (regexec(&expect_res[expect_seen], line + at, 1, &m,
+                  at ? REG_NOTBOL : 0) != 0)
+        break;
+      at += (size_t)m.rm_eo;
+    }
+    expect_seen++;
+  }
+  return expect_n > 0 && expect_seen == expect_n;
+}
+
+/* For the message that the command ended first: what was still expected. */
+const char *expect_unmet(void) {
+  static char buf[80];
+
+  if (expect_n == 0)
+    return "";
+  if (expect_n == 1)
+    return " before the expected output";
+  snprintf(buf, sizeof buf,
+           " before the expected output (%d of %d patterns seen)", expect_seen,
+           expect_n);
+  return buf;
+}
+
+/* For the message that time ran out: how far the patterns had got. */
+const char *expect_sofar(void) {
+  static char buf[80];
+
+  if (expect_n < 2)
+    return "";
+  snprintf(buf, sizeof buf, "; %d of %d expected patterns seen", expect_seen,
+           expect_n);
+  return buf;
+}
 
 /* ---------- parent ---------- */
 
@@ -121,12 +228,14 @@ int look_args(const char *name, int argc, char **argv, int watch, int info,
   int i, n = 0;
 
   memset(o, 0, sizeof *o);
+  expect_reset();
   for (i = 1; i < argc; i++) {
     if (opt_match("babysit", argc, argv, &i, "-l", "--log-dir", &v)) {
       o->dir = v;
     } else if (watch == LOOK_WATCH &&
                opt_match("babysit", argc, argv, &i, "-e", "--expect", &v)) {
-      expect_pat = v;
+      if (expect_add(v) < 0)
+        return -1;
     } else if (watch == LOOK_WATCH &&
                opt_match("babysit", argc, argv, &i, "-i", "--idle", &v)) {
       o->idle_s = v;

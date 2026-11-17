@@ -209,9 +209,16 @@ The line is matched without its
 or
 .B ERR:
 prefix; lines from both streams are checked.
+.IP
+The option may be given more than once.
+Then 0 is returned once every pattern has matched, in the order given: the
+second is looked for only after the first has matched, starting right after
+the text that matched it, and so on.
+One line can therefore satisfy several patterns, if they appear in it in
+order, and a pattern that appears only before its turn has not matched.
 .TP
 .B \-F, \-\-fixed
-Treat the
+Treat every
 .B \-\-expect
 pattern as a plain substring.
 .TP
@@ -506,13 +513,13 @@ The command exited with status
 .TP
 .B 0
 .B \-\-expect
-matched, or
+matched (every pattern, if several were given), or
 .B \-\-detach
 was given.
 .TP
 .B 1
 .B \-\-expect
-was given but the command exited with status 0 without a matching line.
+was given but the command exited with status 0 before it had matched.
 .TP
 .B 124
 .B \-\-timeout
@@ -619,6 +626,18 @@ across either kind of break.
 Text after a NUL byte in a line is not seen.
 A prompt that does not end in a newline is matched only once it has been
 logged, about a second after it was printed.
+.PP
+With several patterns, stdout and stderr are taken in the order their lines
+reach the log, which for lines written at nearly the same moment need not
+be the order the command wrote them in.
+If the command ends before every pattern has matched, its own status is
+returned, and the message on stderr says how many had; if the last pattern
+matches in the final output of a command that then fails, the status is 0
+all the same.
+The command's exit status is to be had from
+.B "babysit info \-\-exit\-code"
+or
+.BR "babysit wait" .
 .SS "\-\-detach means started, not running"
 Status 0 from
 .B \-\-detach

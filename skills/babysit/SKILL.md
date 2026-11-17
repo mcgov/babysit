@@ -339,6 +339,12 @@ unless you add `set -o pipefail` in a shell that has it.
 - **`--expect` is a regular expression.** `.`, `[`, `(`, `*`, `+` and `?`
   mean something in it. Use `--fixed` for text such as `[::]:8080` or
   `(ready)`.
+- **Several `--expect` options mean all of them, in that order.**
+  `--expect 'migrations applied' --expect 'Listening on'` returns 0 only
+  when both have appeared, the first before the second. It does not mean
+  "either". Each is looked for after the text that matched the one before,
+  so a line printed too early does not count. If the command exits first,
+  stderr says how many were seen.
 - **`--expect` sees one line at a time.** It cannot match text that the
   command prints across two lines, and it is not offered the command line
   or `babysit`'s own notes, only what the command wrote.

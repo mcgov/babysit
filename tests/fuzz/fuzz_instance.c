@@ -48,8 +48,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   int from;
 
   FUZZ_GUARD();
-  expect_pat = NULL;
-  expect_fixed = 0;
+  expect_reset();
   if (head > 1) {
     if (put_file(inst_code, data, head) < 0)
       return 0; /* no room */
@@ -79,7 +78,6 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   argv[7] = NULL;
   (void)cmd_watch(7, argv);
   close_from(from);
-  expect_pat = NULL;
-  expect_fixed = 0;
+  expect_reset();
   return 0;
 }

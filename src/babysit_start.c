@@ -45,8 +45,8 @@ static void follow_log(int fd) {
 
 /*
  * The options of "start", up to the command. Returns 0 with O filled in,
- * or -1 after complaining. --expect and --fixed are left in expect_pat and
- * expect_fixed.
+ * or -1 after complaining. The --expect patterns and --fixed are kept by
+ * babysit_cmdline.c.
  */
 int start_args(int argc, char **argv, struct start_opts *o) {
   const char *v;
@@ -54,6 +54,7 @@ int start_args(int argc, char **argv, struct start_opts *o) {
 
   memset(o, 0, sizeof *o);
   o->idle_ms = o->timeout_ms = -1;
+  expect_reset();
   for (i = 1; i < argc; i++) {
     if (strcmp(argv[i], "--") == 0) {
       i++;
@@ -62,7 +63,8 @@ int start_args(int argc, char **argv, struct start_opts *o) {
     if (argv[i][0] != '-' || argv[i][1] == '\0')
       break;
     if (opt_match("babysit", argc, argv, &i, "-e", "--expect", &v)) {
-      expect_pat = v;
+      if (expect_add(v) < 0)
+        return -1;
     } else if (opt_match("babysit", argc, argv, &i, "-i", "--idle", &v)) {
       o->idle_s = v;
     } else if (opt_match("babysit", argc, argv, &i, "-t", "--timeout", &v)) {
@@ -128,15 +130,8 @@ int cmd_start(int argc, char **argv) {
   detach = o.detach;
   follow = o.follow;
 
-  if (expect_pat && !expect_fixed) {
-    int rc = regcomp(&expect_re, expect_pat, REG_EXTENDED | REG_NOSUB);
-    if (rc != 0) {
-      char msg[256];
-      regerror(rc, &expect_re, msg, sizeof msg);
-      fprintf(stderr, "babysit: bad --expect pattern: %s\n", msg);
-      return EXIT_USAGE;
-    }
-  }
+  if (expect_compile() < 0)
+    return EXIT_USAGE;
 
   if (resolve_logdir(dir, logdir, sizeof logdir) < 0)
     return EXIT_USAGE;
@@ -197,8 +192,6 @@ int cmd_start(int argc, char **argv) {
   }
   close(status_pipe[1]);
   free(cmdline);
-  if (expect_pat && !expect_fixed)
-    regfree(&expect_re);
   while (waitpid(mid, &st, 0) < 0 && errno == EINTR)
     ;
 
@@ -235,7 +228,8 @@ int cmd_start(int argc, char **argv) {
 
   /* Now just wait to be told why to return, showing the log as it grows
    * if that was asked for. A warning about the log may come first; it is
-   * passed on, and the wait goes on. */
+   * passed on, and the wait goes on. So does word of how many of several
+   * --expect patterns have been seen. */
   for (;;) {
     follow_log(follow_fd);
     if (follow_fd >= 0) {
@@ -246,6 +240,10 @@ int cmd_start(int argc, char **argv) {
         continue;
     }
     n = read_msg(status_pipe[0], &m);
+    if (n >= 0 && m.type == MSG_SEEN) {
+      expect_seen = m.value;
+      continue;
+    }
     if (n < 0 || m.type != MSG_WARN_LOG)
       break;
     fprintf(stderr,
@@ -273,22 +271,22 @@ int cmd_start(int argc, char **argv) {
   case MSG_STALL:
     fprintf(stderr,
             "babysit: %s: stalled: no output for %s; pid %ld is still "
-            "running\n",
-            child_id, idle_s, (long)pid);
+            "running%s\n",
+            child_id, idle_s, (long)pid, expect_sofar());
     return EXIT_STALLED;
   case MSG_TIMEOUT:
     fprintf(stderr,
-            "babysit: %s: timed out after %s; pid %ld is still running\n",
-            child_id, timeout_s, (long)pid);
+            "babysit: %s: timed out after %s; pid %ld is still running%s\n",
+            child_id, timeout_s, (long)pid, expect_sofar());
     return EXIT_TIMEOUT;
   case MSG_SIGNAL:
     fprintf(stderr, "babysit: %s: killed by signal %d%s\n", child_id, m.value,
-            expect_pat ? " before the expected output" : "");
+            expect_unmet());
     return 128 + m.value;
   case MSG_EXIT:
     fprintf(stderr, "babysit: %s: exited with code %d%s\n", child_id, m.value,
-            expect_pat ? " before the expected output" : "");
-    return (expect_pat && m.value == 0) ? 1 : m.value;
+            expect_unmet());
+    return (expect_n && m.value == 0) ? 1 : m.value;
   default:
     break;
   }

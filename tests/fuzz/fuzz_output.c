@@ -10,7 +10,8 @@
  * pipes to the log.
  *
  * The input is a little program. Its first byte is the length (0 to 8) of
- * the text that follows, which becomes a fixed --expect pattern. Then
+ * the text that follows, which becomes two fixed --expect patterns (all of
+ * it, then its second half). Then
  * come operations, one byte each (taken modulo 8), with their arguments:
  *
  *   0  N, then N bytes: they arrive on the command's stdout
@@ -228,7 +229,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   size_t i, n;
 
   FUZZ_GUARD();
-  expect_pat = NULL;
+  expect_reset();
   if (size < 1)
     return 0;
   if (fill_fd >= 0 && (full_runs > 0 || no_room())) {
@@ -252,7 +253,11 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   n = data[0] % 9;
   if (n > size - 1)
     n = size - 1;
-  expect_pat = n ? text_of(data + 1, n) : NULL;
+  /* Two patterns, to be seen in that order: the text, and its second
+   * half. */
+  if (n && (expect_add(text_of(data + 1, n)) < 0 ||
+            expect_add(text_of(data + 1 + n / 2, n - n / 2)) < 0))
+    die("cannot keep the patterns");
   expect_fixed = 1;
 
   for (i = 1 + n; i < size;) {
@@ -311,7 +316,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   status_fd = -1;
   close(status[0]);
   log_fd = -1;
-  expect_pat = NULL;
+  expect_reset();
   check_log();
   if (fill_fd >= 0)
     fill_disk((const uint8_t *)got, ngot);

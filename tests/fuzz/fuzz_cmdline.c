@@ -36,8 +36,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   int argc, i;
 
   FUZZ_GUARD();
-  expect_pat = NULL;
-  expect_fixed = 0;
+  expect_reset();
   s = text_of(data, size);
   argc = split_args(s, name, argv, 32);
 
@@ -60,7 +59,6 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   (void)look_args("watch", argc, argv, LOOK_WATCH, 0, &o, ops, 1);
   (void)look_args("wait", argc, argv, LOOK_WAIT, 0, &o, ops, 1);
   (void)look_args("cat", argc, argv, 0, 0, &o, ops, 3);
-  expect_pat = NULL; /* they pointed into s */
-  expect_fixed = 0;
+  expect_reset(); /* the patterns pointed into s */
   return 0;
 }

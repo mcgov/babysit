@@ -155,18 +155,19 @@ void release(int type, int value) {
 
 static void flush_line(struct lstream *s) {
   char *data = s->buf + PREFIX_LEN;
-  int hit = 0;
+  int hit = 0, seen = expect_seen;
 
-  if (watching && expect_pat) {
+  if (watching && expect_n) {
     data[s->len] = '\0';
-    hit = expect_fixed ? strstr(data, expect_pat) != NULL
-                       : regexec(&expect_re, data, 0, NULL, 0) == 0;
+    hit = expect_line(data);
   }
   data[s->len] = '\n';
   emit(s->buf, PREFIX_LEN + s->len + 1);
   s->len = 0;
   if (hit)
     release(MSG_MATCH, 0);
+  else if (expect_seen != seen)
+    send_msg(MSG_SEEN, expect_seen); /* the parent reports it if we fail */
 }
 
 void flush_partial(struct lstream *s) {
