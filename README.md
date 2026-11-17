@@ -127,6 +127,7 @@ make check-asan      # AddressSanitizer (with leak detection on Linux)
 make check-ubsan     # UndefinedBehaviorSanitizer
 make check-tsan      # ThreadSanitizer
 make coverage        # LLVM source-based coverage, report in build/coverage/
+make fuzz            # libFuzzer with AddressSanitizer, a minute per target
 make lint            # shellcheck and man page warnings
 ./precommit.sh       # clang-format (LLVM style), clang-tidy, -Werror build
 make check-freebsd-vm   # all of the above on FreeBSD, in a throwaway QEMU VM
@@ -139,6 +140,51 @@ make check-freebsd-vm   # all of the above on FreeBSD, in a throwaway QEMU VM
 The test cases are in `tests/testcases/`, one file each, numbered in the
 order they run. Every file starts with a comment giving its goal, its
 procedure and what makes it fail, and can be run on its own.
+
+One of them, `0051`, makes library calls fail. `tests/faultinject.c` is
+built as `bin/faultinject.so` and preloaded into the two programs, where it
+makes the Nth call of one function fail: `malloc`, `realloc`, `fork`,
+`pipe`, `statvfs`, `fsync`, `mkfifo`, `opendir`, `localtime` or `gmtime`.
+The test runs `babysit start` and `babysitd --once` again and again, with
+N one higher each time, until every call has failed once. Whatever fails,
+`babysit` must run the command or refuse cleanly, and `babysitd` must not
+lose a log. To try one failure by hand:
+
+```sh
+LD_PRELOAD=bin/faultinject.so BABYSIT_FAULT=fork:2 bin/babysit start -- true
+```
+
+The AddressSanitizer and ThreadSanitizer builds bring their own `malloc`,
+so there the test leaves `malloc` and `realloc` out.
+
+`make fuzz` builds six libFuzzer targets with AddressSanitizer and runs
+each in turn. They are in `tests/fuzz/`, one file each, and every file
+starts with a comment saying what its input means and what counts as a
+failure:
+
+| Target | What it fuzzes |
+|---|---|
+| `cmdline` | the options of every subcommand |
+| `output` | the babysitter's path from the command's pipes to the log |
+| `control` | the control FIFO and the `exit_code` file |
+| `instance` | an instance on disk, as `check`, `info`, `cat`, `wait` and `watch` read it |
+| `conf` | `babysit.conf`, as both programs read it |
+| `pack` | a housekeeping pass of `babysitd` over a made-up log directory |
+
+```sh
+make fuzz FUZZ_SECONDS=600                          # ten minutes per target
+tests/fuzz/run.sh --target output --seconds 300     # one target
+tests/fuzz/run.sh --ramdisk-size 64M                # a disk that fills sooner
+```
+
+The targets work on a RAM disk of a fixed size, 1G by default, which the
+`output` target fills up: `babysit` must then count what its log missed,
+and say so in the log once there is room again. The RAM disk is mounted in
+a private namespace, needs no root, and is gone when the run ends. The
+corpus and any input that crashes a target are kept in `build/fuzz/`.
+Fuzzing needs clang with libFuzzer, and `unshare` (Linux) for the RAM
+disk. It has only been run on Linux, and is not part of `make test` or of
+CI. See `tests/fuzz/run.sh --help`.
 
 `make perf` measures what `babysit` costs. It times a command that prints
 200, 200,000 and 2,000,000 lines (a light, a medium and a heavy load), on
