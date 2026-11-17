@@ -139,22 +139,6 @@ Full documentation is in the man pages, in `docs/`: `babysit(1)`,
 
 ---
 
-## Exit codes
-
-| Exit status | Meaning |
-|---|---|
-| *N* | the command exited with status *N* (128+signal if killed) |
-| 0 | `--expect` matched (every one, if several), or `--detach` |
-| 1 | `--expect` given, command exited 0 before it had matched |
-| 124 | `--timeout` expired; command still running |
-| 125 | no output for `--idle` seconds; command still running |
-| 126 / 127 | command could not be executed / was not found |
-| 2 | usage or internal error |
-
-
-> [!NOTE]
-> The rest of this document has not been edited by a human.
-
 ## Platforms
 
 | Platform | Status |
@@ -199,80 +183,6 @@ make check-freebsd-vm   # all of the above on FreeBSD, in a throwaway QEMU VM
 `./precommit.sh --fix` reformats the sources. It needs `clang-format` and
 `clang-tidy`.
 
-### Test cases
-
-The test cases are in `tests/testcases/`, one file each, numbered in the
-order they run. Every file starts with a comment giving its goal, its
-procedure and what makes it fail, and can be run on its own.
-
-### Fault injection
-
-One of them, `0051`, makes library calls fail. `tests/faultinject.c` is
-built as `bin/faultinject.so` and preloaded into the two programs, where it
-makes the Nth call of one function fail: `malloc`, `realloc`, `fork`,
-`pipe`, `statvfs`, `fsync`, `mkfifo`, `opendir`, `localtime` or `gmtime`.
-The test runs `babysit start` and `babysitd --once` again and again, with
-N one higher each time, until every call has failed once. Whatever fails,
-`babysit` must run the command or refuse cleanly, and `babysitd` must not
-lose a log. To try one failure by hand:
-
-```sh
-LD_PRELOAD=bin/faultinject.so BABYSIT_FAULT=fork:2 bin/babysit start -- true
-```
-
-The AddressSanitizer and ThreadSanitizer builds bring their own `malloc`,
-so there the test leaves `malloc` and `realloc` out.
-
-### Fuzzing
-
-`make fuzz` builds six libFuzzer targets with AddressSanitizer and runs
-each in turn. They are in `tests/fuzz/`, one file each, and every file
-starts with a comment saying what its input means and what counts as a
-failure:
-
-| Target | What it fuzzes |
-|---|---|
-| `cmdline` | the options of every subcommand |
-| `output` | the babysitter's path from the command's pipes to the log |
-| `control` | the control FIFO and the `exit_code` file |
-| `instance` | an instance on disk, as `check`, `info`, `cat`, `wait` and `watch` read it |
-| `conf` | `babysit.conf`, as both programs read it |
-| `pack` | a housekeeping pass of `babysitd` over a made-up log directory |
-
-```sh
-make fuzz FUZZ_SECONDS=600                          # ten minutes per target
-tests/fuzz/run.sh --target output --seconds 300     # one target
-tests/fuzz/run.sh --ramdisk-size 64M                # a disk that fills sooner
-```
-
-The targets work on a RAM disk of a fixed size, 1G by default, which the
-`output` target fills up: `babysit` must then count what its log missed,
-and say so in the log once there is room again. The RAM disk is mounted in
-a private namespace, needs no root, and is gone when the run ends. The
-corpus and any input that crashes a target are kept in `build/fuzz/`.
-Fuzzing needs clang with libFuzzer, and `unshare` (Linux) for the RAM
-disk. It has only been run on Linux, and is not part of `make test` or of
-CI. See `tests/fuzz/run.sh --help`.
-
-### Performance
-
-`make perf` measures what `babysit` costs. It times a command that prints
-200, 200,000 and 2,000,000 lines (a light, a medium and a heavy load), on
-its own and under `babysit start`, and stores every timing in an SQLite
-database under `~/.local/share/babysit/`. The report it prints sets each
-run against the five before it and against the fastest the command has
-ever run without `babysit`, and ends with a rolling table of recent runs:
-
-```sh
-make perf                         # measure, store, report
-tests/perf.sh --report-only       # the latest report again
-tests/perf.sh --note "before the output rewrite" --repeat 9
-```
-
-The performance cases never fail on speed, only if a run goes wrong, and
-they are not part of `make test` or of CI: timings from shared runners say
-little. It needs python3. See `tests/perf.sh --help`.
-
 ### Running CI locally
 
 The CI jobs can be run on your own machine, each in a fresh container:
@@ -316,20 +226,6 @@ make install-skill SKILL_LINK=1    # link instead of copy, to work on the skill
 
 Start a new agent session afterwards; skills are read when a session starts.
 The skill only helps where `babysit` itself is installed and on `PATH`.
-
-## Packaging
-
-```sh
-make dist            # build/babysit-VERSION.tar.gz (source)
-make bindist         # build/babysit-VERSION-linux-ARCH.tar.gz
-make rpm             # needs rpmbuild; Fedora and openSUSE
-make deb             # needs dpkg-buildpackage and debhelper
-make arch-pkg        # on Arch Linux; needs makepkg, not as root
-gmake freebsd-pkg    # on FreeBSD; needs pkg
-```
-
-The version is defined once, as `BABYSIT_VERSION` in `src/babysit.h`;
-`debian/changelog` must start with the same version.
 
 ## License
 
