@@ -12,6 +12,11 @@ babysit \- run a command detached, log it, and return early if it stalls
 .I child_id
 .RI [ options ]
 .br
+.B babysit wait
+.I child_id
+.RB [ \-\-timeout
+.IR secs ]
+.br
 .B babysit check
 .I child_id
 .br
@@ -113,6 +118,25 @@ Like
 it leaves the command running when it returns, unless
 .B \-\-onfail
 says otherwise.
+.TP
+.B wait
+Block, in silence, until the command of an instance has exited, and return
+its exit status; with
+.BR \-\-timeout ,
+return 124 if that time passes first, the command still running.
+On an instance that has already finished it returns at once.
+It prints nothing on stdout and reads none of the command's output, which
+makes it the cheapest way to wait:
+.B watch
+follows the log while it waits,
+.B wait
+only waits.
+It suits a command that says something when it starts and then nothing
+until it is done:
+.B "start \-\-expect"
+for the first, then
+.B wait
+for the rest.
 .TP
 .BR check ", " status
 Print
@@ -470,9 +494,10 @@ If
 has since packed or expired the instance, these commands say so and exit 2.
 .SH EXIT STATUS
 Of
-.B start
+.BR start ,
+.B watch
 and
-.BR watch :
+.BR wait :
 .TP
 .I N
 The command exited with status

@@ -39,8 +39,9 @@ complete_line() { # the words typed so far; prints what is offered, sorted
 }
 
 check "the commands" "$(complete_line babysit "")" \
-    "--help --version cat check info signal start status watch "
-check "a command by its beginning" "$(complete_line babysit wa)" "watch "
+    "--help --version cat check info signal start status wait watch "
+check "commands by their beginning" "$(complete_line babysit wa)" "wait watch "
+check "options of wait" "$(complete_line babysit wait --)" "--log-dir --timeout "
 check "options of start" "$(complete_line babysit start --f)" "--fixed --follow "
 check "options of info, and not those of start" "$(complete_line babysit info --)" \
     "--exit-code --log --log-dir --pid "

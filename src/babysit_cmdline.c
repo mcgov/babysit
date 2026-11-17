@@ -124,19 +124,19 @@ int look_args(const char *name, int argc, char **argv, int watch, int info,
   for (i = 1; i < argc; i++) {
     if (opt_match("babysit", argc, argv, &i, "-l", "--log-dir", &v)) {
       o->dir = v;
-    } else if (watch &&
+    } else if (watch == LOOK_WATCH &&
                opt_match("babysit", argc, argv, &i, "-e", "--expect", &v)) {
       expect_pat = v;
-    } else if (watch &&
+    } else if (watch == LOOK_WATCH &&
                opt_match("babysit", argc, argv, &i, "-i", "--idle", &v)) {
       o->idle_s = v;
     } else if (watch &&
                opt_match("babysit", argc, argv, &i, "-t", "--timeout", &v)) {
       o->timeout_s = v;
-    } else if (watch && opt_match("babysit", argc, argv, &i, "--onfail",
-                                  "--onfail", &v)) {
+    } else if (watch == LOOK_WATCH && opt_match("babysit", argc, argv, &i,
+                                                "--onfail", "--onfail", &v)) {
       o->onfail = v;
-    } else if (watch &&
+    } else if (watch == LOOK_WATCH &&
                opt_match("babysit", argc, argv, &i, "-F", "--fixed", NULL)) {
       expect_fixed = 1;
     } else if (info &&

@@ -19,7 +19,7 @@
  *   babysit_control.c   its control FIFO and the exit_code file
  *   babysit_instance.c  instances on disk
  *   babysit_inspect.c   "check", "info", "signal", "cat"
- *   babysit_watch.c     "watch"
+ *   babysit_watch.c     "watch", "wait"
  */
 #ifndef BABYSIT_INTERNAL_H
 #define BABYSIT_INTERNAL_H
@@ -34,6 +34,11 @@
 #define LINE_MAX_ 4096
 #define PARTIAL_FLUSH_MS 1000 /* log an unterminated line after this long */
 #define FOLLOW_TICK_MS 100    /* how often start --follow looks at the log */
+
+/* What look_args() accepts besides --log-dir: the options of "watch", or
+ * of those only --timeout, which is all "wait" takes. */
+#define LOOK_WATCH 1
+#define LOOK_WAIT 2
 
 enum {
   MSG_START = 1, /* value: child pid */
@@ -149,5 +154,6 @@ int cmd_cat(int argc, char **argv);
 
 /* babysit_watch.c */
 int cmd_watch(int argc, char **argv);
+int cmd_wait(int argc, char **argv);
 
 #endif

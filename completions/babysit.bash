@@ -52,7 +52,7 @@ _babysit() {
     COMPREPLY=()
 
     if [ "$COMP_CWORD" -eq 1 ]; then
-        mapfile -t COMPREPLY < <(compgen -W "start watch check status info signal cat --help --version" -- "$cur")
+        mapfile -t COMPREPLY < <(compgen -W "start watch wait check status info signal cat --help --version" -- "$cur")
         return
     fi
     sub="${COMP_WORDS[1]}"
@@ -74,7 +74,7 @@ _babysit() {
             return
             ;;
         -e | --expect | -i | --idle | -t | --timeout)
-            case "$sub" in start | watch) return ;; esac
+            case "$sub" in start | watch | wait) return ;; esac
             ;;
     esac
 
@@ -114,6 +114,13 @@ _babysit() {
         watch)
             if [[ "$cur" == -* ]]; then
                 mapfile -t COMPREPLY < <(compgen -W "--expect --fixed --idle --timeout --onfail --log-dir" -- "$cur")
+            else
+                mapfile -t COMPREPLY < <(compgen -W "$(_babysit_ids)" -- "$cur")
+            fi
+            ;;
+        wait)
+            if [[ "$cur" == -* ]]; then
+                mapfile -t COMPREPLY < <(compgen -W "--timeout --log-dir" -- "$cur")
             else
                 mapfile -t COMPREPLY < <(compgen -W "$(_babysit_ids)" -- "$cur")
             fi

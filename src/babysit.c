@@ -43,6 +43,7 @@ void usage(FILE *f) {
       f,
       "Usage: babysit start [options] [--] command [args...]\n"
       "       babysit watch CHILD_ID [options]\n"
+      "       babysit wait CHILD_ID [--timeout SECS]\n"
       "       babysit check CHILD_ID\n"
       "       babysit info CHILD_ID [--pid | --log | --exit-code]\n"
       "       babysit signal SIGNAL CHILD_ID\n"
@@ -96,6 +97,9 @@ void usage(FILE *f) {
       "beginning,\n"
       "and returns as start would; with no options it waits for the command "
       "to exit.\n"
+      "wait blocks in silence until the command has exited and returns its "
+      "exit\n"
+      "status, or 124 if --timeout passes first; it reads no output at all.\n"
       "check, or status, says whether the command is running (exit 0) or "
       "not\n"
       "(exit 1).\n"
@@ -115,7 +119,7 @@ void usage(FILE *f) {
       "2m).\n"
       "The command gets /dev/null as stdin and its own process group.\n"
       "\n"
-      "Exit status of start and watch:\n"
+      "Exit status of start, watch and wait:\n"
       "  N        the command exited with status N (128+signal if killed)\n"
       "  0        --expect matched, or --detach\n"
       "  1        --expect was given but the command exited 0 without a match\n"
@@ -140,6 +144,8 @@ int main(int argc, char **argv) {
     return cmd_start(argc - 1, argv + 1);
   if (strcmp(c, "watch") == 0)
     return cmd_watch(argc - 1, argv + 1);
+  if (strcmp(c, "wait") == 0)
+    return cmd_wait(argc - 1, argv + 1);
   if (strcmp(c, "check") == 0 || strcmp(c, "status") == 0)
     return cmd_check(argc - 1, argv + 1);
   if (strcmp(c, "info") == 0)

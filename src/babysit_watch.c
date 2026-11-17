@@ -6,7 +6,7 @@
  * license; see the file LICENSE for details.
  */
 /*
- * babysit: "babysit watch".
+ * babysit: "babysit watch" and "babysit wait".
  */
 #include "babysit_internal.h"
 
@@ -45,7 +45,7 @@ int cmd_watch(int argc, char **argv) {
   off_t pos = 0, from;
   int fd, sig = 0, code, state, ending = 0;
 
-  if (look_args("watch", argc, argv, 1, 0, &o, ops, 1) < 0)
+  if (look_args("watch", argc, argv, LOOK_WATCH, 0, &o, ops, 1) < 0)
     return EXIT_USAGE;
   child_id = ops[0];
   if (o.idle_s && parse_interval(o.idle_s, &idle_ms) < 0) {
@@ -149,4 +149,98 @@ int cmd_watch(int argc, char **argv) {
     }
     nanosleep(&tick, NULL);
   }
+}
+
+/*
+ * babysit wait ID [--timeout SECS]: block, in silence, until the command
+ * has exited, and return its exit status; 124 if SECS pass first, with the
+ * command still running.
+ *
+ * Nothing is read and nothing is polled. The babysitter holds a write lock
+ * on one byte of the log for exactly as long as it has not reaped the
+ * command, so asking for a read lock on that byte and waiting for it is
+ * waiting for the command. The kernel wakes us when it is over. For
+ * --timeout a timer interrupts the wait, and goes on interrupting it every
+ * tenth of a second after that; each time, the caller looks at the clock
+ * itself. Nothing is taken from the handler having run: it only exists so
+ * that the signal interrupts the wait and does not end the process. On a
+ * filesystem that cannot wait for a lock, the state is looked at ten
+ * times a second.
+ */
+static void on_alarm(int sig) { (void)sig; }
+
+/* Wait until the lock on the log's LOCK_CHILD byte can be had, and let it
+ * go again at once. 0 when that happened; -1 if a signal cut the wait
+ * short, and -2 if there are no locks to wait for here. */
+static int wait_for_child_lock(const char *log) {
+  struct flock fl;
+  int fd = open(log, O_RDONLY), rc = -1;
+
+  if (fd < 0)
+    return -1;
+  memset(&fl, 0, sizeof fl);
+  fl.l_type = F_RDLCK;
+  fl.l_whence = SEEK_SET;
+  fl.l_start = LOCK_CHILD;
+  fl.l_len = 1;
+  if (fcntl(fd, F_SETLKW, &fl) == 0)
+    rc = 0;
+  else if (errno != EINTR)
+    rc = -2;
+  close(fd); /* which also gives the lock back */
+  return rc;
+}
+
+int cmd_wait(int argc, char **argv) {
+  const char *ops[1] = {NULL}, *child_id;
+  struct timespec tick = {0, WATCH_TICK_MS * 1000000L};
+  long long timeout_ms = -1, start;
+  struct itimerval timer;
+  struct instance in;
+  struct sigaction sa;
+  struct look o;
+  int code, state;
+
+  if (look_args("wait", argc, argv, LOOK_WAIT, 0, &o, ops, 1) < 0)
+    return EXIT_USAGE;
+  child_id = ops[0];
+  if (o.timeout_s && parse_interval(o.timeout_s, &timeout_ms) < 0) {
+    fprintf(stderr, "babysit: invalid --timeout interval '%s'\n", o.timeout_s);
+    return EXIT_USAGE;
+  }
+  if (find_instance(o.dir, child_id, &in) < 0)
+    return EXIT_USAGE;
+
+  start = now_ms();
+  if (timeout_ms > 0) {
+    memset(&sa, 0, sizeof sa);
+    sa.sa_handler = on_alarm; /* no SA_RESTART: the wait must be cut short */
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGALRM, &sa, NULL);
+    memset(&timer, 0, sizeof timer);
+    timer.it_value.tv_sec = (time_t)(timeout_ms / 1000);
+    timer.it_value.tv_usec = (suseconds_t)((timeout_ms % 1000) * 1000);
+    timer.it_interval.tv_usec = (suseconds_t)WATCH_TICK_MS * 1000;
+    setitimer(ITIMER_REAL, &timer, NULL);
+  }
+  for (;;) {
+    state = instance_state(&in, &code);
+    if (state != ST_RUNNING)
+      break;
+    if (timeout_ms > 0 && now_ms() - start >= timeout_ms) {
+      fprintf(stderr, "babysit: %s: still running after %s\n", child_id,
+              o.timeout_s);
+      return EXIT_TIMEOUT;
+    }
+    if (wait_for_child_lock(in.log) == -2)
+      nanosleep(&tick, NULL);
+  }
+  if (state == ST_LOST) {
+    fprintf(stderr,
+            "babysit: %s: the babysitter is gone and left no exit status; "
+            "see the log\n",
+            child_id);
+    return EXIT_USAGE;
+  }
+  return code;
 }
