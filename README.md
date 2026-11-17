@@ -172,6 +172,22 @@ docker, and python3 with the yaml module. See `tests/ci-local.sh --help`.
 and runs the suite, the sanitizers and the package build inside it. See
 `tests/freebsd-vm.sh --help`.
 
+## For coding agents
+
+`skills/babysit/` is a skill that teaches a coding agent (Claude Code, for
+one) when and how to use `babysit`: start servers and long commands under
+it, keep the identifier, read output with `babysit cat`, stop things with
+`babysit signal`.
+
+```sh
+make install-skill                 # into ~/.claude/skills, for every project
+make install-skill SKILLDIR=/path/to/project/.claude/skills   # one project
+make install-skill SKILL_LINK=1    # link instead of copy, to work on the skill
+```
+
+Start a new agent session afterwards; skills are read when a session starts.
+The skill only helps where `babysit` itself is installed and on `PATH`.
+
 ## Packaging
 
 ```sh
