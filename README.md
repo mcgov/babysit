@@ -27,18 +27,6 @@ make install-skill SKILL_DIR=/$agent_dir/skills
 
 ```
 
-## Exit codes
-
-| Exit status | Meaning |
-|---|---|
-| *N* | the command exited with status *N* (128+signal if killed) |
-| 0 | `--expect` matched (every one, if several), or `--detach` |
-| 1 | `--expect` given, command exited 0 before it had matched |
-| 124 | `--timeout` expired; command still running |
-| 125 | no output for `--idle` seconds; command still running |
-| 126 / 127 | command could not be executed / was not found |
-| 2 | usage or internal error |
-
 ## Example: waiting for a server that might never come up
 
 ```sh
@@ -66,11 +54,6 @@ babysit check "$child_id" || echo "server has stopped"
 babysit check "$child_id"
 ```
 
-## Example: --expect multiple lines, return once all have appeared
-```sh
-babysit start --expect 'migrations applied' --expect 'Listening on' \
-    --timeout 60 -- ./server --port 8080
-```
 ---
 
 ## Why not `timeout` and _____?
@@ -155,6 +138,19 @@ Full documentation is in the man pages, in `docs/`: `babysit(1)`,
 `babysitd(8)` and `babysit.conf(5)`.
 
 ---
+
+## Exit codes
+
+| Exit status | Meaning |
+|---|---|
+| *N* | the command exited with status *N* (128+signal if killed) |
+| 0 | `--expect` matched (every one, if several), or `--detach` |
+| 1 | `--expect` given, command exited 0 before it had matched |
+| 124 | `--timeout` expired; command still running |
+| 125 | no output for `--idle` seconds; command still running |
+| 126 / 127 | command could not be executed / was not found |
+| 2 | usage or internal error |
+
 
 > [!NOTE]
 > The rest of this document has not been edited by a human.
