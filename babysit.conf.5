@@ -43,17 +43,38 @@ happens for as many hours as the two clocks differ.
 Default:
 .BR local .
 .TP
+.B archive_after_days
+Finished logs stay where they are, readable under their identifiers, until
+their day is this many days old; then
+.BR babysitd (8)
+packs them into the archive.
+1 archives every day before today; 7 keeps a week in place.
+0 never archives by age.
+Whatever the value, the log of a command that is still running is never
+archived, and a day dated later than today (the clock was set back) always
+is.
+Default: 1.
+.TP
+.B archive_on_usage_percentage
+When the filesystem holding the logs is at least this full, in percent, do
+not wait for
+.BR archive_after_days :
+archive every day before today, and also pack the finished hours of today
+in place.
+Archiving compresses logs; it does not delete any.
+0 disables.
+Default: 90.
+.PP
+Together these two are the window in which finished logs are left in place:
+a log is collected once it is past
+.BR archive_after_days ,
+or sooner if the disk reaches
+.BR archive_on_usage_percentage .
+.TP
 .B max_age_days
 Delete archived logs and finished logs older than this many days.
 0 keeps them forever.
 Default: 30.
-.TP
-.B compact_at_disk_percent
-When the filesystem holding the logs is at least this full, in percent,
-also pack the finished hours of days that are not over yet, so that the
-logs written so far are compressed.
-0 disables.
-Default: 90.
 .TP
 .B delete_at_disk_percent
 When that filesystem is at least this full, in percent, delete packed logs
@@ -65,7 +86,7 @@ This is the only setting that removes logs before they reach
 If the disk is full of other files it will delete every packed log without
 bringing usage under the limit, so it is disabled unless set.
 It is best set above
-.BR compact_at_disk_percent ,
+.BR archive_on_usage_percentage ,
 so that compression is tried first.
 0 disables.
 Default: 0.
@@ -91,8 +112,9 @@ The file is read once, when the service starts.
 .SH EXAMPLE
 .nf
 timezone = utc
+archive_after_days = 7
+archive_on_usage_percentage = 80
 max_age_days = 14
-compact_at_disk_percent = 80
 delete_at_disk_percent = 95
 check_interval = 12h
 .fi

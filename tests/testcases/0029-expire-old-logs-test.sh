@@ -33,7 +33,7 @@ mkdir -p "$work/d2/archive"
 check "babysitd: keeps recent archives" "$(ls "$work/d2/archive" | count)" 2
 touch -t "$old10d" "$work/d2"/archive/*
 find "$(dirname "$done_log")" "$(dirname "$live")" -exec touch -t "$old10d" {} +
-printf 'max_age_days = 5\ncompact_at_disk_percent = 0\n' >"$work/conf"
+printf 'max_age_days = 5\narchive_on_usage_percentage = 0\n' >"$work/conf"
 "$bsd" --once --log-dir "$work/d2" --config "$work/conf" 2>/dev/null
 check "babysitd: expires old archives (from config)" "$(ls "$work/d2/archive" | count)" 0
 check "babysitd: expires old finished logs" "$([ -e "$done_log" ] && echo present || echo gone)" gone

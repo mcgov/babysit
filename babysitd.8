@@ -22,8 +22,10 @@ files the log of each instance under
 by the minute it started in.
 .TP
 .B Archive past days
-Every day directory before today's is packed, as far as it is finished,
-into
+Every day directory that is
+.B archive_after_days
+old (1 by default, which is every day before today's) is packed, as far as
+it is finished, into
 .PP
 .RS
 .RS
@@ -81,9 +83,11 @@ Whenever it wakes, the service checks how full the filesystem holding
 .I LOGDIR
 is.
 At
-.B compact_at_disk_percent
-or more it does not wait for today to be over either: every hour of today
-that is over is packed in place, as far as it is finished, as
+.B archive_on_usage_percentage
+or more it does not wait: every day before today's is archived whatever
+.B archive_after_days
+says, and every hour of today that is over is packed in place, as far as it
+is finished, as
 .IR YYYYmmdd / HH .tar.gz .
 An instance still being written stays in its hour directory and is packed
 later, as with days.
@@ -120,8 +124,12 @@ Archives and packed hours whose file is older than
 are deleted, as are finished logs that old which are still in a day
 directory because something else there is being written.
 .PP
-In short: packing collects the logs of finished commands, whichever they
-are, and nothing else.
+In short: packing collects the logs of any finished command that is past
+the configured window, and nothing else.
+The window is
+.BR archive_after_days ,
+cut short when the disk reaches
+.BR archive_on_usage_percentage .
 The dates are only how the files are organised.
 A long-running command's log is not collected until the command has
 finished, however long ago it started, so it is not in the archive that was
@@ -210,9 +218,16 @@ Overrides
 from the configuration file.
 Default: 6h.
 .TP
-.BI "\-u, \-\-compact\-at\-disk\-percent " N
+.BI "\-A, \-\-archive\-after\-days " N
 Overrides
-.B compact_at_disk_percent
+.B archive_after_days
+from the configuration file.
+0 never archives by age.
+Default: 1.
+.TP
+.BI "\-u, \-\-archive\-on\-usage\-percentage " N
+Overrides
+.B archive_on_usage_percentage
 from the configuration file.
 0 disables.
 Default: 90.

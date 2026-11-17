@@ -31,7 +31,7 @@ check_interval = 2d
 check_interval = 90
 check_interval = 5m
 check_interval = soon
-compact_at_disk_percent = many
+archive_on_usage_percentage = many
 no equals sign here
 surprise = 1
 timezone = utc

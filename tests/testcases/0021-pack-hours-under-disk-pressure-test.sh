@@ -4,7 +4,7 @@
 # Test: today's finished hours are packed when the disk fills up
 #
 # Goal:
-#   At compact_at_disk_percent the service stops waiting for today to be
+#   At archive_on_usage_percentage the service stops waiting for today to be
 #   over: every hour of it that is over is packed in place as
 #   <day>/<HH>.tar.gz, as far as it is finished. An instance still being
 #   written stays where it is, and the hour that is not over yet is left

@@ -352,7 +352,11 @@ Finished logs do not stay where they are for ever:
 packs past days into
 .IR LOGDIR /archive
 and deletes old ones.
-It only ever collects the logs of commands that have finished.
+It collects the logs of commands that have finished, once they are past the
+window set in
+.BR babysit.conf (5)
+.RB ( archive_after_days ,
+or sooner on a full disk).
 The log of a command that is still running stays where it is, under its
 identifier, however long ago it was started, and is therefore missing from
 the archive made for its day if it had not finished by then; it is

@@ -12,7 +12,8 @@
  * <log-dir>/<YYYYmmdd>/<HH>/<MM>/<salt>/log (see babysit.h). At every
  * pass, babysitd does this:
  *
- *   1. Every day directory before today's is packed into
+ *   1. Every day directory that is archive_after_days old (1 by default:
+ *      every day before today's) is packed into
  *      <log-dir>/archive/babysit_logs_<YYYYmmdd>.tar.gz and removed, as far
  *      as it is finished: an instance whose log is still being written is
  *      left out and stays in place, and goes into an archive of its own
@@ -23,9 +24,10 @@
  *      packed in place. babysit refuses to start anything (exit status 75)
  *      while such records are in the way.
  *   2. When the filesystem holding the logs is at least
- *      compact_at_disk_percent full, it does not wait for today to be over
- *      either: every hour of today that is over is packed, as far as it is
- *      finished, into <YYYYmmdd>/<HH>.tar.gz.
+ *      archive_on_usage_percentage full, it does not wait: every day before
+ *      today's is archived whatever archive_after_days says, and every
+ *      hour of today that is over is packed, as far as it is finished,
+ *      into <YYYYmmdd>/<HH>.tar.gz.
  *   3. Archives and packed hours, and finished logs still lying in a day
  *      directory, older than max_age_days are deleted.
  *   4. When that filesystem is at least delete_at_disk_percent full (off by
@@ -71,8 +73,9 @@
 
 static const char *prog = "babysitd";
 static char logdir[PATH_BUF];
-static int journal; /* stderr goes to the systemd journal */
-static int use_utc; /* timezone = utc: days and hours are UTC ones */
+static int journal;            /* stderr goes to the systemd journal */
+static long archive_after = 1; /* archive_after_days */
+static int use_utc;            /* timezone = utc: days and hours are UTC ones */
 
 static volatile sig_atomic_t stop; /* SIGTERM or SIGINT: finish and exit */
 static int wake_fd = -1;           /* our write end of the request FIFO */
@@ -171,12 +174,19 @@ static void usage(FILE *f) {
          "                           nothing asks for it sooner; a number with "
          "an\n"
          "                           s, m, h or d suffix (default: 6h)\n"
-         "  -u, --compact-at-disk-percent N\n"
+         "  -A, --archive-after-days N\n"
+         "                           archive the finished logs of a day once "
+         "it is N\n"
+         "                           days old: 1 is every day before today; 0 "
+         "never\n"
+         "                           archives by age (default: 1)\n"
+         "  -u, --archive-on-usage-percentage N\n"
          "                           when the log filesystem is N%% full or "
          "more,\n"
-         "                           also pack the finished hours of days that "
-         "are\n"
-         "                           not over yet; 0 disables (default: 90)\n"
+         "                           archive every day before today "
+         "regardless, and\n"
+         "                           pack today's finished hours; 0 disables\n"
+         "                           (default: 90)\n"
          "  -D, --delete-at-disk-percent N\n"
          "                           when the log filesystem is N%% full or "
          "more,\n"
@@ -189,8 +199,9 @@ static void usage(FILE *f) {
          "\n"
          "Options given on the command line override the configuration file, "
          "which\n"
-         "holds 'key = value' lines: max_age_days, check_interval,\n"
-         "compact_at_disk_percent, delete_at_disk_percent, timezone.\n");
+         "holds 'key = value' lines: archive_after_days,\n"
+         "archive_on_usage_percentage, max_age_days, delete_at_disk_percent,\n"
+         "check_interval, timezone.\n");
 }
 
 static void say(int warning, const char *fmt, ...) {
@@ -362,7 +373,8 @@ static void load_config(const char *path, int required, long *max_age,
       continue;
     }
     if (strcmp(key, "max_age_days") != 0 &&
-        strcmp(key, "compact_at_disk_percent") != 0 &&
+        strcmp(key, "archive_after_days") != 0 &&
+        strcmp(key, "archive_on_usage_percentage") != 0 &&
         strcmp(key, "delete_at_disk_percent") != 0) {
       say(1, "%s:%d: unknown key '%s'", path, lineno, key);
       continue;
@@ -373,7 +385,9 @@ static void load_config(const char *path, int required, long *max_age,
     }
     if (strcmp(key, "max_age_days") == 0)
       *max_age = v;
-    else if (strcmp(key, "compact_at_disk_percent") == 0)
+    else if (strcmp(key, "archive_after_days") == 0)
+      archive_after = v;
+    else if (strcmp(key, "archive_on_usage_percentage") == 0)
       *disk_pct = v;
     else
       *delete_pct = v;
@@ -693,12 +707,13 @@ static int pack_finished(const char *parent, const char *name, const char *stem,
 }
 
 /*
- * Pack every day other than TODAY into the archive, as far as it is
- * finished. Those are the days that are over, and also any dated after
- * today: the clock has been set back since they were filed, and babysit
- * starts nothing until they are out of the way.
+ * Pack days into the archive, as far as they are finished: every day
+ * before DUE, which is the oldest day still inside the archive_after_days
+ * window, and also any day dated after TODAY, whatever the window: the
+ * clock has been set back since those were filed, and babysit starts
+ * nothing until they are out of the way.
  */
-static void archive_days(const char *today) {
+static void archive_days(const char *today, const char *due) {
   char adir[PATH_BUF + 16], from[PATH_BUF + 300], stem[PATH_BUF + 400],
       out[PATH_BUF + 420];
   struct dirent *de;
@@ -716,6 +731,8 @@ static void archive_days(const char *today) {
      * things, and they are not ours to pack and remove. */
     if (!is_day_name(name) || strcmp(name, today) == 0)
       continue;
+    if (strcmp(name, today) < 0 && strcmp(name, due) >= 0)
+      continue; /* over, but not old enough to be archived yet */
     snprintf(from, sizeof from, "%s/%s", logdir, name);
     snprintf(stem, sizeof stem, "%s/babysit_logs_%s", adir, name);
     rc = pack_finished(logdir, name, stem, adir, out, sizeof out, &left);
@@ -1097,15 +1114,29 @@ static void clean_old(long max_age_days) {
 
 /* One round of housekeeping. The caller holds the pass lock. */
 static void full_pass(long max_age, long disk_pct, long delete_pct) {
-  char now[ID_MAX], today[9], hour[3];
+  char now[ID_MAX], today[9], hour[3], due[ID_MAX];
+  time_t t = time(NULL);
+  int pct;
 
-  if (minute_path(time(NULL), use_utc, now, sizeof now) < 0)
+  if (minute_path(t, use_utc, now, sizeof now) < 0)
     return;
   memcpy(today, now, 8);
   today[8] = '\0';
   memcpy(hour, now + 9, 2);
   hour[2] = '\0';
-  archive_days(today);
+
+  /* The window: days from DUE on are still kept in place. A full disk
+   * closes it, and archive_after_days = 0 leaves it open for ever. */
+  pct = disk_pct > 0 ? disk_used_percent() : -1;
+  if (pct >= 0 && pct >= disk_pct) {
+    snprintf(due, sizeof due, "%s", today);
+  } else if (archive_after <= 0 ||
+             minute_path(t - ((time_t)(archive_after - 1) * 86400), use_utc,
+                         due, sizeof due) < 0) {
+    snprintf(due, sizeof due, "00000000");
+  }
+  due[8] = '\0';
+  archive_days(today, due);
   pack_later(today, hour, now + 12);
   pack_finished_hours(today, hour, disk_pct);
   clean_old(max_age);
@@ -1114,7 +1145,7 @@ static void full_pass(long max_age, long disk_pct, long delete_pct) {
 
 int main(int argc, char **argv) {
   const char *dir = NULL, *config = NULL, *age_s = NULL, *poll_opt = NULL;
-  const char *disk_opt = NULL, *delete_opt = NULL;
+  const char *disk_opt = NULL, *delete_opt = NULL, *after_opt = NULL;
   const char *v;
   char cfg[PATH_BUF], cwd[PATH_BUF];
   long max_age = 30, interval_s = 6L * 3600, disk_pct = 90, delete_pct = 0;
@@ -1135,8 +1166,11 @@ int main(int argc, char **argv) {
                          &v)) {
       delete_opt = v;
     } else if (opt_match(prog, argc, argv, &i, "-u",
-                         "--compact-at-disk-percent", &v)) {
+                         "--archive-on-usage-percentage", &v)) {
       disk_opt = v;
+    } else if (opt_match(prog, argc, argv, &i, "-A", "--archive-after-days",
+                         &v)) {
+      after_opt = v;
     } else if (opt_match(prog, argc, argv, &i, "-1", "--once", NULL)) {
       once = 1;
     } else if (opt_match(prog, argc, argv, &i, "-V", "--version", NULL)) {
@@ -1165,8 +1199,12 @@ int main(int argc, char **argv) {
     fprintf(stderr, "babysitd: invalid --check-interval '%s'\n", poll_opt);
     return EXIT_USAGE;
   }
+  if (after_opt && parse_num(after_opt, &archive_after) < 0) {
+    fprintf(stderr, "babysitd: invalid --archive-after-days '%s'\n", after_opt);
+    return EXIT_USAGE;
+  }
   if (disk_opt && parse_num(disk_opt, &disk_pct) < 0) {
-    fprintf(stderr, "babysitd: invalid --compact-at-disk-percent '%s'\n",
+    fprintf(stderr, "babysitd: invalid --archive-on-usage-percentage '%s'\n",
             disk_opt);
     return EXIT_USAGE;
   }
@@ -1176,7 +1214,7 @@ int main(int argc, char **argv) {
     return EXIT_USAGE;
   }
   if (disk_pct > 100 || delete_pct > 100) {
-    fprintf(stderr, "babysitd: compact_at_disk_percent and "
+    fprintf(stderr, "babysitd: archive_on_usage_percentage and "
                     "delete_at_disk_percent must be 0-100\n");
     return EXIT_USAGE;
   }

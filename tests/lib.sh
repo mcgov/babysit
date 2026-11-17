@@ -23,6 +23,7 @@
 #                                its stderr)
 #   logof FILE                   the path of that instance's log
 #   ago SECONDS                  a "touch -t" timestamp that long ago
+#   daysago N                    the date N days ago, as in an identifier
 #   plant DIR ID TEXT            lay out a finished instance by hand: a log
 #                                holding TEXT at DIR/ID/log, old enough for
 #                                babysitd to pack
@@ -110,6 +111,12 @@ ago() {
 # babysitd leaves alone whatever changed in the last two seconds.
 settle() { find "$@" -exec touch -t "$old1m" {} +; }
 plant() { mkdir -p "$1/$2" && echo "$3" >"$1/$2/log" && settle "$1/${2%%/*}"; }
+
+# YYYYmmdd for N days ago (GNU date, then BSD date)
+daysago() {
+    local t=$(( $(date +%s) - $1 * 86400 ))
+    date -d "@$t" +%Y%m%d 2>/dev/null || date -r "$t" +%Y%m%d
+}
 
 count() { wc -l | tr -d ' '; }      # BSD wc pads its output
 

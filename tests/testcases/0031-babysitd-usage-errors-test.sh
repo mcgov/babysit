@@ -31,9 +31,9 @@ check "babysitd: option without its value is a usage error" $? 2
 check "babysitd: bad --max-age-days is rejected" $? 2
 "$bsd" --once --log-dir "$work/dc" --config /dev/null --check-interval soon 2>/dev/null
 check "babysitd: bad --check-interval is rejected" $? 2
-"$bsd" --once --log-dir "$work/dc" --config /dev/null --compact-at-disk-percent 101 2>/dev/null
+"$bsd" --once --log-dir "$work/dc" --config /dev/null --archive-on-usage-percentage 101 2>/dev/null
 check "babysitd: disk percent over 100 is rejected" $? 2
-"$bsd" --once --log-dir "$work/dc" --config /dev/null --compact-at-disk-percent x 2>/dev/null
+"$bsd" --once --log-dir "$work/dc" --config /dev/null --archive-on-usage-percentage x 2>/dev/null
 check "babysitd: bad disk percent is rejected" $? 2
 "$bsd" --once --log-dir "$work/dc" --config "$work/no-such.conf" 2>"$work/d2e"
 check "babysitd: a named config file must exist" $? 2

@@ -42,7 +42,7 @@ touch -t "$(ago 100)" "$work/dp/$today/01.tar.gz"
 check "delete: off by default" "$(find "$work/dp" -name '*.tar.gz' | count)" 4
 "$bsd" --once --log-dir "$work/dp" --config /dev/null -u 0 --delete-at-disk-percent 100 2>"$work/dp2"
 check "delete: nothing is deleted below the limit" "$(find "$work/dp" -name '*.tar.gz' | count)" 4
-printf 'delete_at_disk_percent = 1\ncompact_at_disk_percent = 0\n' >"$work/dp.conf"
+printf 'delete_at_disk_percent = 1\narchive_on_usage_percentage = 0\n' >"$work/dp.conf"
 "$bsd" --once --log-dir "$work/dp" --config "$work/dp.conf" 2>"$work/dp3"
 check "delete: packed logs go, oldest first" \
     "$(sed -n 's/.*deleted .*\/\([^/]*\/[^/]*\.tar\.gz\)$/\1/p' "$work/dp3" | tr '\n' ' ')" \
