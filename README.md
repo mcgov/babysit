@@ -94,8 +94,8 @@ GOES BACKWARDS.
 `babysitd` is an optional systemd user service that archives the logs of
 past days, packs sooner when the disk fills up, and expires old logs.
 
-Full documentation is in the man pages: `babysit(1)`, `babysitd(8)` and
-`babysit.conf(5)`.
+Full documentation is in the man pages, in `docs/`: `babysit(1)`,
+`babysitd(8)` and `babysit.conf(5)`.
 
 ## Platforms
 

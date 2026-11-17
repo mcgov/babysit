@@ -38,10 +38,10 @@ BABYSIT_HDRS = src/babysit.h src/babysit_internal.h
 
 PROGS    = $(BINDIR)/babysit $(BINDIR)/babysitd
 TESTBINS = $(BINDIR)/lockprobe
-MANPAGES = babysit.1 babysitd.8 babysit.conf.5
+MANPAGES = docs/babysit.1 docs/babysitd.8 docs/babysit.conf.5
 DISTFILES = Makefile LICENSE README.md precommit.sh .clang-format \
             .clang-tidy src \
-            $(MANPAGES) tests packaging \
+            docs tests packaging \
             debian .gitlab-ci.yml
 
 all: $(PROGS) $(BINDIR)/babysitd.service
@@ -135,9 +135,9 @@ install: all
 	mkdir -p $(DESTDIR)$(PREFIX)/bin $(DESTDIR)$(MANDIR)/man1 \
 	    $(DESTDIR)$(MANDIR)/man5 $(DESTDIR)$(MANDIR)/man8 $(DESTDIR)$(DOCDIR)
 	cp $(PROGS) $(DESTDIR)$(PREFIX)/bin/
-	cp babysit.1 $(DESTDIR)$(MANDIR)/man1/
-	cp babysit.conf.5 $(DESTDIR)$(MANDIR)/man5/
-	cp babysitd.8 $(DESTDIR)$(MANDIR)/man8/
+	cp docs/babysit.1 $(DESTDIR)$(MANDIR)/man1/
+	cp docs/babysit.conf.5 $(DESTDIR)$(MANDIR)/man5/
+	cp docs/babysitd.8 $(DESTDIR)$(MANDIR)/man8/
 	if [ -n "$(UNITDIR)" ]; then mkdir -p $(DESTDIR)$(UNITDIR) && \
 	    cp $(BINDIR)/babysitd.service $(DESTDIR)$(UNITDIR)/; fi
 	cp src/babysitd/babysit.conf README.md LICENSE $(DESTDIR)$(DOCDIR)/
