@@ -66,6 +66,7 @@ babysit check "$bbid" || echo "server is dead"
 |---|---|
 | `babysit start [options] -- command` | run a command, print its identifier |
 | `babysit watch CHILD_ID [options]` | attach to a running instance and return as `start` would |
+| `babysit wait CHILD_ID [--timeout SECS]` | block silently until the command exits; its exit status, or 124 |
 | `babysit check CHILD_ID` | exit 0 and print `running`, or exit 1 and print `exited N` (`status` is another name for it) |
 | `babysit info CHILD_ID [--pid\|--log\|--exit-code]` | where the log is, the state, the pid while it runs |
 | `babysit signal SIGNAL CHILD_ID` | have the babysitter signal the command |
@@ -113,7 +114,8 @@ The code is C99 and POSIX.1-2008.
 ```sh
 make                 # build bin/babysit and bin/babysitd
 make test            # end-to-end test suite
-make install         # PREFIX=/usr/local by default
+make install-user    # for yourself, under ~/.local; no sudo
+sudo make install    # or for all users, under /usr/local; pick one
 systemctl --user enable --now babysitd
 ```
 

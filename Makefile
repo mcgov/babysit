@@ -145,7 +145,31 @@ lint:
 
 # ---- install -------------------------------------------------------------
 
+# Two ways to install, and they are different places, so pick one:
+#
+#   sudo make install     for all users, under PREFIX (/usr/local)
+#   make install-user     for yourself, under $HOME/.local, no sudo
+#
+# Running one and then the other leaves two copies; "sudo make uninstall"
+# or "make uninstall-user" removes one again.
+USER_INSTALL = PREFIX=$(HOME)/.local UNITDIR=$(HOME)/.config/systemd/user
+
+install-user:
+	$(MAKE) $(USER_INSTALL) install
+
+uninstall-user:
+	$(MAKE) $(USER_INSTALL) uninstall
+
 install: all
+	@d="$(DESTDIR)$(PREFIX)"; \
+	while [ ! -e "$$d" ] && [ "$$d" != "$${d%/*}" ]; do d="$${d%/*}"; done; \
+	[ -n "$$d" ] || d=/; \
+	if [ ! -w "$$d" ]; then \
+	    echo "make install: you cannot write to $$d."; \
+	    echo "  to install for all users:  sudo make install"; \
+	    echo "  to install for yourself:   make install-user"; \
+	    exit 1; \
+	fi
 	mkdir -p $(DESTDIR)$(PREFIX)/bin $(DESTDIR)$(MANDIR)/man1 \
 	    $(DESTDIR)$(MANDIR)/man5 $(DESTDIR)$(MANDIR)/man8 $(DESTDIR)$(DOCDIR)
 	# Copy beside, then rename into place: a babysitter started from the
@@ -172,6 +196,22 @@ install: all
 	    cp completions/babysit.bash $(DESTDIR)$(COMPDIR)/babysit && \
 	    cp completions/babysit.bash $(DESTDIR)$(COMPDIR)/babysitd; fi
 	cp src/babysitd/babysit.conf README.md LICENSE $(DESTDIR)$(DOCDIR)/
+
+# Remove what "make install" with the same PREFIX (and UNITDIR, COMPDIR)
+# put there, file by file. Logs, your configuration file and a running
+# service are not touched.
+uninstall:
+	rm -f $(DESTDIR)$(PREFIX)/bin/babysit $(DESTDIR)$(PREFIX)/bin/babysitd
+	rm -f $(DESTDIR)$(MANDIR)/man1/babysit.1 \
+	    $(DESTDIR)$(MANDIR)/man5/babysit.conf.5 \
+	    $(DESTDIR)$(MANDIR)/man8/babysitd.8
+	rm -f $(DESTDIR)$(DOCDIR)/babysit.conf $(DESTDIR)$(DOCDIR)/README.md \
+	    $(DESTDIR)$(DOCDIR)/LICENSE
+	-rmdir $(DESTDIR)$(DOCDIR) 2>/dev/null
+	if [ -n "$(UNITDIR)" ]; then \
+	    rm -f $(DESTDIR)$(UNITDIR)/babysitd.service; fi
+	if [ -n "$(COMPDIR)" ]; then \
+	    rm -f $(DESTDIR)$(COMPDIR)/babysit $(DESTDIR)$(COMPDIR)/babysitd; fi
 
 # The skill that teaches a coding agent to use babysit (skills/babysit/).
 # It is copied, so the installed skill does not depend on this checkout; pass
@@ -254,4 +294,4 @@ clean:
 
 .PHONY: all test check perf check-asan check-ubsan check-tsan check-freebsd-vm \
         coverage lint \
-        install install-skill dist bindist rpm deb arch-pkg freebsd-pkg clean
+        install install-user uninstall uninstall-user install-skill dist bindist rpm deb arch-pkg freebsd-pkg clean
