@@ -318,8 +318,12 @@ says
 Use UTC where
 .B babysit
 is driven by automation: local time repeats an hour every autumn where
-clocks are set back, with the consequence described under
-.BR "WHEN THE CLOCK GOES BACKWARDS" .
+clocks are set back, and the identifiers of that hour then sort among those
+of the hour before.
+That is all a clock going backwards does.
+The date is only how the logs are filed; it is the salt that makes an
+identifier unique, and a command is started whatever dates the log
+directory already holds.
 .PP
 Nothing in an identifier or a log path is a process id.
 A pid says which process something is only for as long as that process is
@@ -441,66 +445,6 @@ had, if it had one.
 If
 .BR babysitd (8)
 has since packed or expired the instance, these commands say so and exit 2.
-.SH WHEN THE CLOCK GOES BACKWARDS
-Identifiers are dated, and they are only worth reading if the dates are
-true.
-If the log directory holds records dated later than now, the clock has been
-set back since they were filed (or the
-.B timezone
-setting has changed, or local time has just repeated an hour).
-New records would be filed in among older ones that claim to be newer.
-.PP
-.B babysit
-does not let that happen.
-It starts nothing, prints nothing on stdout, says on stderr which record is
-in the way, and exits with status
-.BR 75 ,
-which means: nothing is wrong with the command, try again later.
-It does not move or pack anything itself.
-.PP
-The next step belongs to
-.BR babysitd (8),
-which packs later-dated records that are finished: days into the archive,
-later hours and minutes of today in place.
-If the service is running,
-.B babysit
-has already woken it by the time it returns, and a retry a second or two
-later succeeds.
-If it is not, run
-.PP
-.RS
-babysitd \-\-once
-.RE
-.PP
-and try again.
-A caller driving
-.B babysit
-automatically should treat 75 as it would
-.BR EAGAIN :
-wait briefly, retry, and give up after a few attempts.
-.PP
-A retry always gets through in the end.
-Only finished records count as being in the way, and those are exactly the
-ones
-.BR babysitd (8)
-can pack.
-An instance dated later than now that is still being written is not held
-against a new one: nobody could pack it, and refusing on its account would
-mean refusing for as long as its command cares to run.
-When it does finish, it becomes a finished later-dated record like any
-other, and the next
-.B "babysit start"
-may get one more 75 while the service packs it.
-The one thing a retry can still run into is a record finished in the last
-two seconds, which
-.B babysitd
-does not touch yet; the retry after that succeeds.
-.PP
-With
-.B "timezone = utc"
-none of this is triggered by daylight saving time.
-For the same reason one log directory should be used with one setting, and
-by machines that agree on the time.
 .SH EXIT STATUS
 Of
 .B start
@@ -534,14 +478,6 @@ seconds; the command is still running.
 .B 126, 127
 The command could not be executed, or was not found.
 No log is left behind.
-.TP
-.B 75
-The log directory holds records dated later than now.
-Nothing was started; try again once
-.BR babysitd (8)
-has packed them.
-See
-.BR "WHEN THE CLOCK GOES BACKWARDS" .
 .TP
 .B 2
 Usage or internal error.

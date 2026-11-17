@@ -18,11 +18,7 @@
  *      as it is finished: an instance whose log is still being written is
  *      left out and stays in place, and goes into an archive of its own
  *      (babysit_logs_<YYYYmmdd>.2.tar.gz) by the first pass that finds it
- *      finished. The same is done for anything dated later than now, which
- *      is there because the clock was set back: later days go to the
- *      archive, later hours of today and later minutes of this hour are
- *      packed in place. babysit refuses to start anything (exit status 75)
- *      while such records are in the way.
+ *      finished.
  *   2. When the filesystem holding the logs is at least
  *      archive_on_usage_percentage full, it does not wait: every day before
  *      today's is archived whatever archive_after_days says, and every
@@ -709,11 +705,10 @@ static int pack_finished(const char *parent, const char *name, const char *stem,
 /*
  * Pack days into the archive, as far as they are finished: every day
  * before DUE, which is the oldest day still inside the archive_after_days
- * window, and also any day dated after TODAY, whatever the window: the
- * clock has been set back since those were filed, and babysit starts
- * nothing until they are out of the way.
+ * window. The dates are only how the files are organised; a day dated
+ * after today (the clock was set back) is simply not due yet.
  */
-static void archive_days(const char *today, const char *due) {
+static void archive_days(const char *due) {
   char adir[PATH_BUF + 16], from[PATH_BUF + 300], stem[PATH_BUF + 400],
       out[PATH_BUF + 420];
   struct dirent *de;
@@ -729,10 +724,8 @@ static void archive_days(const char *today, const char *due) {
 
     /* Only what babysit itself names: the log directory may hold other
      * things, and they are not ours to pack and remove. */
-    if (!is_day_name(name) || strcmp(name, today) == 0)
-      continue;
-    if (strcmp(name, today) < 0 && strcmp(name, due) >= 0)
-      continue; /* over, but not old enough to be archived yet */
+    if (!is_day_name(name) || strcmp(name, due) >= 0)
+      continue; /* not ours, or not old enough to be archived yet */
     snprintf(from, sizeof from, "%s/%s", logdir, name);
     snprintf(stem, sizeof stem, "%s/babysit_logs_%s", adir, name);
     rc = pack_finished(logdir, name, stem, adir, out, sizeof out, &left);
@@ -819,23 +812,6 @@ static void pack_finished_hours(const char *today, const char *hour,
            limit);
   snprintf(dir, sizeof dir, "%s/%s", logdir, today);
   pack_children(dir, hour, -1, why);
-}
-
-/*
- * Pack what is dated later than now within today: the hours after this
- * one, and the minutes after this one in this hour. Days after today are
- * dealt with by archive_days(). After this, and once whatever is still
- * being written there has finished, babysit will start commands again.
- */
-static void pack_later(const char *today, const char *hour,
-                       const char *minute) {
-  static const char why[] = "the clock has gone backwards";
-  char dir[PATH_BUF + 300];
-
-  snprintf(dir, sizeof dir, "%s/%s", logdir, today);
-  pack_children(dir, hour, 1, why);
-  snprintf(dir, sizeof dir, "%s/%s/%s", logdir, today, hour);
-  pack_children(dir, minute, 1, why);
 }
 
 /* Remember PATH as the deletion candidate if it is the oldest tarball yet. */
@@ -1136,8 +1112,7 @@ static void full_pass(long max_age, long disk_pct, long delete_pct) {
     snprintf(due, sizeof due, "00000000");
   }
   due[8] = '\0';
-  archive_days(today, due);
-  pack_later(today, hour, now + 12);
+  archive_days(due);
   pack_finished_hours(today, hour, disk_pct);
   clean_old(max_age);
   free_disk(delete_pct);

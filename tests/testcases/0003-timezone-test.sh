@@ -13,9 +13,6 @@
 #      local hour never equals the UTC hour: with no configuration, with
 #      "timezone = utc" given through --config, and with the same file in
 #      the default place.
-#      Local-time and UTC runs get a log directory each: records of the
-#      one are dated later than now by the clock of the other, and babysit
-#      refuses to mix them (see the clock-went-backwards test).
 #   2. Give a file with a bad value, and name one that does not exist.
 #
 # Fails if:

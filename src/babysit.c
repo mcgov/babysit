@@ -117,10 +117,6 @@ void usage(FILE *f) {
       "  124      --timeout expired; command still running\n"
       "  125      stalled for --idle seconds; command still running\n"
       "  126/127  the command could not be executed / was not found\n"
-      "  75       the clock has gone backwards; nothing was started; try "
-      "again\n"
-      "           once babysitd has packed the records dated later than "
-      "now\n"
       "  2        usage or internal error, or no such run\n");
 }
 

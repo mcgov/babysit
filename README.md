@@ -26,7 +26,6 @@ babysit start --idle 2m -- make -j8
 | 124 | `--timeout` expired; command still running |
 | 125 | no output for `--idle` seconds; command still running |
 | 126 / 127 | command could not be executed / was not found |
-| 75 | the log directory holds records dated later than now; nothing started, try again (see below) |
 | 2 | usage or internal error |
 
 ## Example: waiting for a server that might never come up
@@ -85,12 +84,6 @@ which is the log directory followed by the identifier, so a log can be
 opened straight from an identifier. Stdout lines are prefixed `OUT: ` and
 stderr lines `ERR: `. Dates are local time; set `timezone = utc` in
 `babysit.conf` when driving `babysit` from automation.
-
-If the clock is set back, the log directory holds records dated later than
-now. `babysit` then starts nothing and exits 75, which means "try again":
-`babysitd` packs those records away (run `babysitd --once` if the service is
-not running) and the retry goes through. See `babysit(1)`, WHEN THE CLOCK
-GOES BACKWARDS.
 
 `babysitd` is an optional systemd user service that archives the logs of
 past days, packs sooner when the disk fills up, and expires old logs.

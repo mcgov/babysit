@@ -60,24 +60,6 @@ an exit status was recorded: a log can still be growing after its command
 has exited, and an instance whose babysitter was killed never gets a status
 at all.
 .TP
-.B Pack records dated later than now
-If the clock has been set back, the log directory holds records dated
-later than now, and
-.BR babysit (1)
-refuses to start anything while they are in the way (see
-.B "WHEN THE CLOCK GOES BACKWARDS"
-there).
-The service clears them: later days go to the archive like past ones, and
-within today each later hour, and each later minute of the current hour,
-is packed in place as
-.IB HH .tar.gz
-or
-.IB MM .tar.gz .
-An instance that is still being written is left in place, and
-.B babysit
-does not hold it against a new one; it is packed, like any other, by the
-first pass that finds it finished.
-.TP
 .B Pack early when the disk fills up
 Whenever it wakes, the service checks how full the filesystem holding
 .I LOGDIR
@@ -240,9 +222,7 @@ Default: 95.
 .TP
 .B \-1, \-\-once
 Do the housekeeping once, then exit.
-Useful from cron, or by hand when
-.BR babysit (1)
-has exited with status 75.
+Useful from cron, or by hand.
 .TP
 .B \-V, \-\-version
 Show the version.
@@ -284,13 +264,10 @@ The service listens on the FIFO
 A byte written there wakes it at once for its whole housekeeping pass,
 exactly as at a scheduled wake-up.
 .BR babysit (1)
-writes one when it refuses to start because of records dated later than
-now, so that a retry finds them packed.
-.PP
-The write never blocks and its failure is ignored, so
-.B babysit
-behaves the same whether or not the service is running.
-Anything may wake the service the same way, which is also how to test it:
+never writes there and never waits for the service: it behaves the same
+whether or not the service is running.
+The FIFO is for asking for a pass by hand, which is also how to test the
+service:
 lay out a log directory by hand, then
 .PP
 .RS
@@ -391,11 +368,7 @@ Or with no long-running process at all, as a periodic one-shot:
 0 */6 * * * /usr/local/bin/babysitd \-\-once
 .RE
 .PP
-In the second form nothing listens on the request FIFO, so a
-.BR babysit (1)
-that has exited with status 75 is not helped until the next run; run
-.B "babysitd \-\-once"
-by hand to help it sooner.
+In the second form nothing listens on the request FIFO.
 Nothing is lost either way.
 .SH PORTABILITY
 Linux and FreeBSD are the supported systems.

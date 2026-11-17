@@ -31,7 +31,7 @@ int cmd_start(int argc, char **argv) {
   const char *idle_s = NULL, *timeout_s = NULL, *dir = NULL, *v;
   const char *config = NULL;
   char logdir[PATH_BUF], cfg[PATH_BUF], child_id[ID_MAX];
-  char minute[ID_MAX], later[ID_MAX];
+  char minute[ID_MAX];
   char path[PATH_BUF + ID_MAX + 8];
   char *cmdline, **cmd;
   long long idle_ms = -1, timeout_ms = -1;
@@ -102,20 +102,6 @@ int cmd_start(int argc, char **argv) {
   if (minute_path(time(NULL), utc, minute, sizeof minute) < 0) {
     fprintf(stderr, "babysit: cannot tell the time\n");
     return EXIT_USAGE;
-  }
-  /* Records dated later than now: the clock has been set back. Filing new
-   * ones among them would make the directory lie about what happened when,
-   * so nothing is started until babysitd has packed them away. That is its
-   * job, not ours; all we do is ask, and tell the caller to come back. */
-  if (find_later(logdir, minute, later, sizeof later)) {
-    request_pass(logdir);
-    fprintf(stderr,
-            "babysit: the clock has gone backwards: %s/%s is dated later "
-            "than now (%s).\n"
-            "babysit: nothing was started. Once babysitd has packed it "
-            "(\"babysitd --once\"), try again.\n",
-            logdir, later, minute);
-    return EXIT_AGAIN;
   }
   cmdline = join_cmdline(cmd);
   if (!cmdline) {

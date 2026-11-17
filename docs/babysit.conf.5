@@ -33,13 +33,10 @@ Change it to
 when
 .B babysit
 is used with automation.
-Local time repeats an hour wherever clocks are set back in autumn, and for
-that hour
-.B babysit
-finds records dated later than now and refuses to start (exit status 75)
-until they are packed; UTC never does that.
-Do not change the setting while there are unpacked logs: the same thing
-happens for as many hours as the two clocks differ.
+Local time repeats an hour wherever clocks are set back in autumn, and the
+identifiers of that hour then sort among those of the hour before; UTC
+never does that.
+Nothing breaks either way: the date is only how the logs are filed.
 Default:
 .BR local .
 .TP
@@ -51,8 +48,7 @@ packs them into the archive.
 1 archives every day before today; 7 keeps a week in place.
 0 never archives by age.
 Whatever the value, the log of a command that is still running is never
-archived, and a day dated later than today (the clock was set back) always
-is.
+archived.
 Default: 1.
 .TP
 .B archive_on_usage_percentage
