@@ -1,27 +1,21 @@
 # babysit
 
-Run a command detached, log it, and return early if it stalls.
+A baby monitor for your child (processes).
 
-`babysit` is for scripts and agents that need to start a process and then
-decide what to do about it: wait for a "ready" line, notice that it has gone
-quiet, or just let it run. Returning early never stops the command; it keeps
-running and its output keeps going to a log.
+`babysit` is primarily for scripts and agents. It offloads the management of file descriptors, redirections, return codes, pids, and process output. Most `babysit` commands do not block; most do not stop the child process when they return.
 
-`babysit start` prints one thing on stdout: an identifier for the run, such as
-`20261116/06/15/k3f9`. The command's output is not copied to the caller; it
-is read from the log, with `babysit cat`, `babysit watch` or `tail -f`.
+`babysit` aims to be readable at a glance for easier human review. It provides a set of commands to:
 
-```sh
-# return once the server is listening (or after 30s), leave it running
-babysit start --expect 'Listening on' --timeout 30 -- ./server --port 8080
+- Start a child process.
+- Observe its stdout and stderr.
+- Identify ominous silences (quickly!).
+- `--expect` a line of output, or expect multiple lines in a specific order across the entire log file.
+- Send a signal to the child.
+- Resolve logs, pids, and exit status for a child process. `babysit` can do this even after the child process exits.
 
-# several --expect: return once all have appeared, in this order
-babysit start --expect 'migrations applied' --expect 'Listening on' \
-    --timeout 60 -- ./server --port 8080
+---
 
-# run a build, but come back if it prints nothing for two minutes
-babysit start --idle 2m -- make -j8
-```
+## Exit codes
 
 | Exit status | Meaning |
 |---|---|
@@ -35,40 +29,72 @@ babysit start --idle 2m -- make -j8
 
 ## Example: waiting for a server that might never come up
 
-The usual way to wait for a server to be ready looks reasonable:
-
 ```sh
-./server --port 8080 > server.log 2>&1 &
-tail -f server.log | grep -q 'Listening on'   # wait until it's ready...
-./run-tests
-```
-
-If the server crashes or hangs before it prints that line, `tail -f` never
-ends and this waits forever. With `babysit`:
-
-```sh
-# start always prints an identifier once there is an instance
-bbid=$(babysit start --expect 'Listening on' --timeout 30s -- ./server --port 8080)
+# start always prints a child_id once there is an instance
+child_id=$(babysit start --expect 'Listening on' --timeout 30s -- ./server --port 8080)
 rc=$?
 case $rc in
   0)   echo "server is up" ;;
   124) echo "no sign of life after 30s, stopping it" >&2
-       babysit signal TERM "$bbid"; exit $rc ;;
+       babysit signal TERM "$child_id"; exit $rc ;;
   *)   echo "server died during start-up (status $rc)" >&2; exit $rc ;;
 esac
 
-# later: come back if it goes quiet for 30 seconds, and interrupt it then
-babysit watch "$bbid" --idle 30s --onfail INT --expect "$success_condition" || {
+# keep waiting, and return early if it goes quiet for 30 seconds.
+# send SIGINT if the child is spinning with no output.
+# return an error code if it stopped but didn't print a specific string.
+babysit watch "$child_id" --idle 30s --onfail INT --expect "$success_condition" || {
     echo "success condition not seen and no output for 30s"
 }
 
 # is it still there?
-babysit check "$bbid" || echo "server is dead"
+babysit check "$child_id" || echo "server has stopped"
+
+# what was the exit code?
+babysit check "$child_id"
 ```
+
+## Example: --expect multiple lines, return once all have appeared
+```sh
+babysit start --expect 'migrations applied' --expect 'Listening on' \
+    --timeout 60 -- ./server --port 8080
+```
+---
+
+## Why not `timeout` and _____?
+
+The `babysit` agent skill allows agents to ask you to approve this:
+
+```sh
+child_id=$(babysit start --idle 2m -- make -j8)
+babysit wait "$child_id" || echo "build failed"
+echo "$(babysit info "$child_id")"
+```
+
+instead of this:
+
+```sh
+! Starting the build and wait for it to finish.
+    timeout 1200 make -j8 1> build.log 2>err.log &
+    build=$!
+    [[ -f build.log ]] || pkill make;
+    timeout 1200 bash -c "until tail -f build.log | grep -q finished; do sleep 1; done"
+    (($?)) && echo "build complete! starting interesting work now..." \
+    ls **/run.log && 
+ > ctrl + b to run in the background
+! Approve access to path '**/'?
+
+> ( •_•) shimmy shamming ....            updated! run /restart to update
+try fast mode! (requires usage credits)
+```
+
+---
+
+## Commands
 
 | Command | What it does |
 |---|---|
-| `babysit start [options] -- command` | run a command, print its identifier |
+| `babysit start [options] -- command` | run a command, print its `child_id` |
 | `babysit watch CHILD_ID [options]` | attach to a running instance and return as `start` would |
 | `babysit wait CHILD_ID [--timeout SECS]` | block silently until the command exits; its exit status, or 124 |
 | `babysit check CHILD_ID` | exit 0 and print `running`, or exit 1 and print `exited N` (`status` is another name for it) |
@@ -77,25 +103,50 @@ babysit check "$bbid" || echo "server is dead"
 | `babysit cat [stdout] [stderr] CHILD_ID` | print the command's output so far, without the `OUT:`/`ERR:` labels |
 
 When the command exits, its status is written to `exit_code` next to the
-log. A pid is only ever given out while the command is running, and
-`babysit signal` avoids needing one at all: the babysitter is the command's
-parent, so its signal cannot land on a process that has since been given
-the same pid.
+log.
 
-Each run is logged to
+## Child process ID
 
-    ~/.local/var/log/babysit/<YYYYmmdd>/<HH>/<MM>/<salt>/log
+When `babysit` starts a child, the initial invocation will return a `child_id` rather than the pid of the child process. The `child_id` directly corresponds to the log directory for that child.
 
-which is the log directory followed by the identifier, so a log can be
-opened straight from an identifier. Stdout lines are prefixed `OUT: ` and
-stderr lines `ERR: `. Dates are local time; set `timezone = utc` in
-`babysit.conf` when driving `babysit` from automation.
+Instead of a pid, `babysit` uses a `child_id` that encodes the start time along with a small salt value. This enables you to check for logs before and after the process lifetime without the fear of race conditions. The scheme also results in a nicely organized log directory which can be archived and saved for later reference.
 
-`babysitd` is an optional systemd user service that archives the logs of
-past days, packs sooner when the disk fills up, and expires old logs.
+Each child process is assigned a `child_id` like:
+
+```
+<YYYYmmdd>/<HH>/<MM>/<salt>
+```
+
+The default output directory for a given run will look like:
+
+```sh
+~/.local/var/log/babysit/<YYYYmmdd>/<HH>/<MM>/<salt>/
+# or, given a child_id of:
+child_id=$(babysit start -- $some_binary)
+# the logs will end up in:
+~/.local/var/log/babysit/$child_id
+```
+
+## Child process log file format
+
+`babysit` combines stdout and stderr into a single file; each line is prefixed with `OUT: ` or `ERR: `.
+`babysit cat` removes the prefix, and can print the streams together or separately.
+
+## babysitd and babysit.conf
+
+`babysit` includes an optional quality-of-life service to make managing automation easier for the (human) user.
+
+`babysit.conf` defines variables for configuring the log rollover, date format, etc.
+
+`babysitd` is an optional systemd user service that can archive and delete old logs automatically after a configurable window of time.
 
 Full documentation is in the man pages, in `docs/`: `babysit(1)`,
 `babysitd(8)` and `babysit.conf(5)`.
+
+---
+
+> [!NOTE]
+> The rest of this document has not been edited by a human.
 
 ## Platforms
 
@@ -141,9 +192,13 @@ make check-freebsd-vm   # all of the above on FreeBSD, in a throwaway QEMU VM
 `./precommit.sh --fix` reformats the sources. It needs `clang-format` and
 `clang-tidy`.
 
+### Test cases
+
 The test cases are in `tests/testcases/`, one file each, numbered in the
 order they run. Every file starts with a comment giving its goal, its
 procedure and what makes it fail, and can be run on its own.
+
+### Fault injection
 
 One of them, `0051`, makes library calls fail. `tests/faultinject.c` is
 built as `bin/faultinject.so` and preloaded into the two programs, where it
@@ -160,6 +215,8 @@ LD_PRELOAD=bin/faultinject.so BABYSIT_FAULT=fork:2 bin/babysit start -- true
 
 The AddressSanitizer and ThreadSanitizer builds bring their own `malloc`,
 so there the test leaves `malloc` and `realloc` out.
+
+### Fuzzing
 
 `make fuzz` builds six libFuzzer targets with AddressSanitizer and runs
 each in turn. They are in `tests/fuzz/`, one file each, and every file
@@ -190,6 +247,8 @@ Fuzzing needs clang with libFuzzer, and `unshare` (Linux) for the RAM
 disk. It has only been run on Linux, and is not part of `make test` or of
 CI. See `tests/fuzz/run.sh --help`.
 
+### Performance
+
 `make perf` measures what `babysit` costs. It times a command that prints
 200, 200,000 and 2,000,000 lines (a light, a medium and a heavy load), on
 its own and under `babysit start`, and stores every timing in an SQLite
@@ -207,6 +266,8 @@ The performance cases never fail on speed, only if a run goes wrong, and
 they are not part of `make test` or of CI: timings from shared runners say
 little. It needs python3. See `tests/perf.sh --help`.
 
+### Running CI locally
+
 The CI jobs can be run on your own machine, each in a fresh container:
 
 ```sh
@@ -219,6 +280,8 @@ It reads the jobs from `.gitlab-ci.yml`, so it runs what GitLab would run,
 against your working tree including uncommitted changes. It needs podman or
 docker, and python3 with the yaml module. See `tests/ci-local.sh --help`.
 
+### FreeBSD VM
+
 `check-freebsd-vm` downloads the official FreeBSD cloud image once (about
 670 MB, kept in `~/.cache/babysit/freebsd-vm`), boots a fresh copy of it,
 and runs the suite, the sanitizers and the package build inside it. See
@@ -227,7 +290,7 @@ and runs the suite, the sanitizers and the package build inside it. See
 ## Tab completion
 
 `make install` also installs bash completion for `babysit` and `babysitd`:
-commands, options, signal names, and the identifiers of your runs, newest
+commands, options, signal names, and the `child_id`s of your runs, newest
 first. It needs the bash-completion package, and takes effect in a new
 shell. To try it without installing: `source completions/babysit.bash`.
 
@@ -235,7 +298,7 @@ shell. To try it without installing: `source completions/babysit.bash`.
 
 `skills/babysit/` is a skill that teaches a coding agent (Claude Code, for
 one) when and how to use `babysit`: start servers and long commands under
-it, keep the identifier, read output with `babysit cat`, stop things with
+it, keep the `child_id`, read output with `babysit cat`, stop things with
 `babysit signal`.
 
 ```sh
