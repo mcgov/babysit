@@ -15,6 +15,16 @@ A baby monitor for your child (processes).
 
 ---
 
+## Quickstart
+```sh
+make                 # build bin/babysit and bin/babysitd
+make test            # end-to-end test suite
+make install-user    # for yourself, under ~/.local; no sudo
+                     # optional: install the 'babysit' skill for your AI agent
+make install-skill SKILL_DIR=/$agent_dir/skills
+
+```
+
 ## Exit codes
 
 | Exit status | Meaning |
