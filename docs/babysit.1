@@ -21,6 +21,11 @@ babysit \- run a command detached, log it, and return early if it stalls
 .br
 .B babysit signal
 .I signal child_id
+.br
+.B babysit cat
+.RB [ stdout ]
+.RB [ stderr ]
+.I child_id
 .SH DESCRIPTION
 .B babysit start
 runs
@@ -136,6 +141,28 @@ other process that has since been given the same pid; that is what makes
 this safer than looking the pid up and calling
 .BR kill (1).
 Exits 1 if the command is not running.
+.TP
+.B cat
+Print what the command has written so far, as the command wrote it: without
+the
+.B "OUT: "
+and
+.B "ERR: "
+labels that the log puts before each line.
+.B "cat stdout"
+prints only what went to its stdout,
+.B "cat stderr"
+only what went to its stderr; with neither, or both, everything is printed,
+in the order it is in the log.
+The command line, the lines about the process and
+.BR babysit 's
+own notes are left out.
+It works on a command that is still running, printing what there is so far,
+and on one that has finished.
+.IP
+The output is the log's, so it is line by line as the log has it: a line
+longer than 4096 bytes comes out in pieces, and output that stopped without
+a newline for a second has one after it.
 .SH OPTIONS
 Options of
 .B start
@@ -535,6 +562,8 @@ of one that is).
 .B signal
 exits 0 once the babysitter has been asked, and 1 if the command is not
 running.
+.B cat
+exits 0.
 All of them exit 2 if there is no such instance.
 .PP
 The reason for returning is also printed on stderr.

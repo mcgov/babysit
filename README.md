@@ -69,6 +69,7 @@ babysit check "$bbid" || echo "server is dead"
 | `babysit check CHILD_ID` | exit 0 and print `running`, or exit 1 and print `exited N` |
 | `babysit info CHILD_ID [--pid\|--log\|--exit-code]` | where the log is, the state, the pid while it runs |
 | `babysit signal SIGNAL CHILD_ID` | have the babysitter signal the command |
+| `babysit cat [stdout] [stderr] CHILD_ID` | print the command's output so far, without the `OUT:`/`ERR:` labels |
 
 When the command exits, its status is written to `exit_code` next to the
 log. A pid is only ever given out while the command is running, and

@@ -47,6 +47,7 @@ void usage(FILE *f) {
       "       babysit check CHILD_ID\n"
       "       babysit info CHILD_ID [--pid | --log | --exit-code]\n"
       "       babysit signal SIGNAL CHILD_ID\n"
+      "       babysit cat [stdout] [stderr] CHILD_ID\n"
       "\n"
       "start runs COMMAND detached from this terminal/pipe and logs its "
       "output to\n"
@@ -99,7 +100,11 @@ void usage(FILE *f) {
       "--exit-code\n"
       "until it has). signal has the babysitter send SIGNAL (INT, TERM, 9, "
       "...) to\n"
-      "the command's process group.\n"
+      "the command's process group. cat prints what the command has "
+      "written so\n"
+      "far, without the OUT:/ERR: labels: its stdout, its stderr, or both "
+      "if\n"
+      "neither or both are named.\n"
       "\n"
       "SECS may be fractional and may carry an s, m or h suffix (0.5, 30s, "
       "2m).\n"
@@ -140,6 +145,8 @@ int main(int argc, char **argv) {
     return cmd_info(argc - 1, argv + 1);
   if (strcmp(c, "signal") == 0)
     return cmd_signal(argc - 1, argv + 1);
+  if (strcmp(c, "cat") == 0)
+    return cmd_cat(argc - 1, argv + 1);
   if (*c)
     fprintf(stderr, "babysit: unknown command '%s'\n\n", c);
   else

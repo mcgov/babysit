@@ -18,7 +18,7 @@
  *   babysit_output.c    its log, echo and line buffering
  *   babysit_control.c   its control FIFO and the exit_code file
  *   babysit_instance.c  instances on disk
- *   babysit_inspect.c   "check", "info", "signal"
+ *   babysit_inspect.c   "check", "info", "signal", "cat"
  *   babysit_watch.c     "watch"
  */
 #ifndef BABYSIT_INTERNAL_H
@@ -144,6 +144,7 @@ int cmd_start(int argc, char **argv);
 int cmd_check(int argc, char **argv);
 int cmd_info(int argc, char **argv);
 int cmd_signal(int argc, char **argv);
+int cmd_cat(int argc, char **argv);
 
 /* babysit_watch.c */
 int cmd_watch(int argc, char **argv);
