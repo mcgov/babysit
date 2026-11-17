@@ -25,6 +25,7 @@ BuildRequires:  gzip
 BuildRequires:  procps
 %else
 BuildRequires:  procps-ng
+%endif
 BuildRequires:  findutils
 Requires:       tar
 Requires:       gzip
@@ -72,5 +73,5 @@ make test CFLAGS="%{optflags}" LDFLAGS="%{build_ldflags}" PREFIX=%{_prefix}
 %{_userunitdir}/babysitd.service
 
 %changelog
-* Sun Nov 15 2026 mcgov <matthew@mcgov.dev> - 0.1.0-1
+* Sun Nov 15 2026 Matthew G. McGovern <matthew@mcgov.dev> - 0.1.0-1
 - Initial package

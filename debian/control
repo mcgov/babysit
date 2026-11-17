@@ -1,7 +1,7 @@
 Source: babysit
 Section: utils
 Priority: optional
-Maintainer: mcgov <matthew@mcgov.dev>
+Maintainer: Matthew G. McGovern <matthew@mcgov.dev>
 Build-Depends: debhelper-compat (= 13), clang, procps
 Standards-Version: 4.7.0
 Homepage: https://gitlab.com/mowws/babysit
