@@ -88,15 +88,6 @@ int __llvm_profile_write_file(void);
 #endif
 #define PATH_BUF 4096
 
-static inline int is_pid_name(const char *s) {
-  if (!*s)
-    return 0;
-  for (; *s; s++)
-    if (*s < '0' || *s > '9')
-      return 0;
-  return 1;
-}
-
 /* $HOME/.local/var/log/babysit */
 static inline int default_log_dir(char *buf, size_t n) {
   const char *home = getenv("HOME");
@@ -127,8 +118,16 @@ static inline int mkdirs(const char *path) {
       return -1;
     *p = '/';
   }
-  if (mkdir(tmp, 0777) < 0 && errno != EEXIST)
-    return -1;
+  if (mkdir(tmp, 0777) < 0) {
+    struct stat sb;
+
+    if (errno != EEXIST)
+      return -1;
+    if (stat(tmp, &sb) == 0 && !S_ISDIR(sb.st_mode)) {
+      errno = ENOTDIR; /* something else has that name */
+      return -1;
+    }
+  }
   return 0;
 }
 

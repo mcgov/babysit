@@ -105,7 +105,7 @@ coverage:
   extends: .fedora-llvm
   stage: test
   script:
-    - make coverage COVERAGE_MIN=85
+    - make coverage COVERAGE_MIN=90
   coverage: '/^Line coverage: (\d+\.\d+)%/'
   artifacts:
     when: always

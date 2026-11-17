@@ -34,4 +34,16 @@ plant "$work/jp" 20230102/00/01/aaaa x
 JOURNAL_STREAM=$(devino "$work/j2") "$bsd" --once --log-dir "$work/jp" --config /dev/null -D 0 -u 0 2>>"$work/j2"
 has "prefix when it is" "$work/j2" '^<6>babysitd: archived'
 
+n=3
+for js in junk 12 12: 12:34x; do
+    plant "$work/jp" "2023010$n/00/01/aaaa" x
+    : >"$work/j$n"
+    JOURNAL_STREAM=$js "$bsd" --once --log-dir "$work/jp" --config /dev/null -D 0 -u 0 2>>"$work/j$n"
+    has "no prefix when JOURNAL_STREAM is '$js'" "$work/j$n" '^babysitd: archived'
+    n=$((n + 1))
+done
+plant "$work/jp" 20230107/00/01/aaaa x
+env -u JOURNAL_STREAM "$bsd" --once --log-dir "$work/jp" --config /dev/null -D 0 -u 0 2>"$work/j7"
+has "no prefix when JOURNAL_STREAM is not set" "$work/j7" '^babysitd: archived'
+
 finish

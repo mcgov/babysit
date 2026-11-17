@@ -442,6 +442,7 @@ static int run_tar(const char *out, const char *dir, const char *name,
       dup2(devnull, 1);
     /* Arguments go straight to tar, not through a shell, and callers
      * never pass a name that starts with '-'. */
+    COVERAGE_FLUSH(); /* exec replaces us; record what ran so far */
     /* NOLINTNEXTLINE(clang-analyzer-optin.taint.GenericTaint) */
     execvp("tar", (char *const *)argv);
     _exit(127);
