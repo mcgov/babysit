@@ -58,6 +58,10 @@ $(BINDIR)/lockprobe: tests/lockprobe.c src/babysit.h
 	@mkdir -p $(BINDIR)
 	$(CC) -std=c99 $(CFLAGS) -o $@ tests/lockprobe.c $(LDFLAGS)
 
+$(BINDIR)/perftool: tests/perftool.c src/babysit.h
+	@mkdir -p $(BINDIR)
+	$(CC) -std=c99 $(CFLAGS) -o $@ tests/perftool.c $(LDFLAGS)
+
 $(BINDIR)/babysitd.service: src/babysitd/babysitd.service.in
 	@mkdir -p $(BINDIR)
 	sed 's|@BINDIR@|$(PREFIX)/bin|' src/babysitd/babysitd.service.in > $@
@@ -66,6 +70,12 @@ $(BINDIR)/babysitd.service: src/babysitd/babysitd.service.in
 
 test check: all $(TESTBINS)
 	bash tests/run.sh --bindir $(BINDIR)
+
+# What babysit costs under a light, a medium and a heavy load, set against
+# earlier runs. Timings are kept in an SQLite database outside the tree;
+# see tests/perf.sh --help.
+perf: all $(BINDIR)/perftool
+	bash tests/perf.sh --bindir $(BINDIR)
 
 # Sanitizer builds. A sanitizer report inside the detached babysitter would
 # otherwise go to /dev/null, so reports are written to files and any file
@@ -123,6 +133,7 @@ check-freebsd-vm:
 lint:
 	shellcheck -x --severity=warning tests/run.sh tests/lib.sh \
 	    tests/freebsd-vm.sh tests/ci-local.sh tests/testcases/*-test.sh \
+	    tests/perf.sh tests/perflib.sh tests/perfcases/*-test.sh \
 	    precommit.sh
 	@for m in $(MANPAGES); do \
 	    out=$$(groff -man -Tutf8 -ww -z $$m 2>&1); \
@@ -192,6 +203,6 @@ freebsd-pkg:
 clean:
 	rm -rf bin $(BUILD)
 
-.PHONY: all test check check-asan check-ubsan check-tsan check-freebsd-vm \
+.PHONY: all test check perf check-asan check-ubsan check-tsan check-freebsd-vm \
         coverage lint \
         install dist bindist rpm deb freebsd-pkg clean

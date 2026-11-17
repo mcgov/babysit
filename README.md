@@ -144,6 +144,23 @@ order they run. Every file starts with a comment giving its goal, its
 procedure and what makes it fail, and can be run on its own.
 
 The CI jobs can be run on your own machine, each in a fresh container:
+`make perf` measures what `babysit` costs. It times a command that prints
+200, 200,000 and 2,000,000 lines (a light, a medium and a heavy load), on
+its own and under `babysit start`, and stores every timing in an SQLite
+database under `~/.local/share/babysit/`. The report it prints sets each
+run against the five before it and against the fastest the command has
+ever run without `babysit`, and ends with a rolling table of recent runs:
+
+```sh
+make perf                         # measure, store, report
+tests/perf.sh --report-only       # the latest report again
+tests/perf.sh --note "before the output rewrite" --repeat 9
+```
+
+The performance cases never fail on speed, only if a run goes wrong, and
+they are not part of `make test` or of CI: timings from shared runners say
+little. It needs python3. See `tests/perf.sh --help`.
+
 
 ```sh
 tests/ci-local.sh --list              # the jobs, and which can run here
