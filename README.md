@@ -1,10 +1,12 @@
 # babysit
 
-A baby monitor for your child (processes).
+*A baby monitor for your child (processes).*
 
-`babysit` is primarily for scripts and agents. It offloads the management of file descriptors, redirections, return codes, pids, and process output. Most `babysit` commands do not block; most do not stop the child process when they return.
+`babysit` is primarily a tool for agent assited coding sessions. The actual program is designed to be used by coding agents; since it offloads their need to manage the file descriptors, redirections, return codes, pids, and output. Because of this: *Most `babysit` commands do not block; most do not stop the child process when they return.*
 
-`babysit` aims to be readable at a glance for easier human review. It provides a set of commands to:
+`babysit` aims to be readable at a glance for easy human review; the design allows your agent to request approval for a small set of well defined process operations.
+
+`babysit` provides a set of commands to:
 
 - Start a child process.
 - Observe its stdout and stderr.
