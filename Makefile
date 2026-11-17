@@ -189,6 +189,17 @@ deb: dist
 	tar -C $(BUILD)/deb -xzf $(BUILD)/babysit-$(VERSION).tar.gz
 	cd $(BUILD)/deb/babysit-$(VERSION) && dpkg-buildpackage -b -us -uc
 
+# build/arch/babysit-VERSION-1-ARCH.pkg.tar.zst, on Arch Linux (needs
+# makepkg, which refuses to run as root)
+arch-pkg: dist
+	rm -rf $(BUILD)/arch
+	mkdir -p $(BUILD)/arch
+	cp $(BUILD)/babysit-$(VERSION).tar.gz $(BUILD)/arch/
+	sum=$$(sha256sum $(BUILD)/babysit-$(VERSION).tar.gz | cut -d ' ' -f 1); \
+	    sed "s/@VERSION@/$(VERSION)/; s/@SHA256@/$$sum/" \
+	    packaging/arch/PKGBUILD.in > $(BUILD)/arch/PKGBUILD
+	cd $(BUILD)/arch && makepkg -f --noconfirm
+
 # build/babysit-VERSION.pkg, on FreeBSD (needs pkg; run with gmake)
 freebsd-pkg:
 	rm -rf $(BUILD)/pkg
@@ -205,4 +216,4 @@ clean:
 
 .PHONY: all test check perf check-asan check-ubsan check-tsan check-freebsd-vm \
         coverage lint \
-        install dist bindist rpm deb freebsd-pkg clean
+        install dist bindist rpm deb arch-pkg freebsd-pkg clean

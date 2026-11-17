@@ -1,5 +1,10 @@
 # SPDX-License-Identifier: MIT
+#
+# One spec for Fedora, its relatives, and openSUSE. The differences are a
+# package name and two macros that only Fedora defines.
 %global toolchain clang
+%{!?build_ldflags:%global build_ldflags %{nil}}
+%{!?_pkgdocdir:%global _pkgdocdir %{_docdir}/%{name}}
 
 Name:           babysit
 Version:        @VERSION@
@@ -16,6 +21,9 @@ BuildRequires:  systemd-rpm-macros
 BuildRequires:  bash
 BuildRequires:  tar
 BuildRequires:  gzip
+%if 0%{?suse_version}
+BuildRequires:  procps
+%else
 BuildRequires:  procps-ng
 BuildRequires:  findutils
 Requires:       tar

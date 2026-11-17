@@ -186,6 +186,32 @@ rpm-arm64:
   extends: rpm
   tags: [saas-linux-small-arm64]
 
+# The same spec on openSUSE.
+rpm-suse:
+  stage: package
+  image: opensuse/tumbleweed
+  before_script:
+    - zypper -n -q install clang make tar gzip procps findutils rpm-build
+        systemd-rpm-macros
+  script:
+    - make rpm
+  artifacts:
+    paths: [build/rpm/RPMS/]
+
+# Arch Linux. makepkg refuses to run as root, so the build is handed to an
+# unprivileged user.
+arch:
+  stage: package
+  image: archlinux:latest
+  before_script:
+    - pacman -Syu --noconfirm --needed base-devel clang procps-ng
+    - useradd -m builder
+    - chown -R builder .
+  script:
+    - su builder -c "make arch-pkg"
+  artifacts:
+    paths: [build/arch/*.pkg.tar.zst]
+
 deb:
   stage: package
   image: debian:trixie

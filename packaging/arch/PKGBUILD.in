@@ -1,0 +1,42 @@
+# SPDX-License-Identifier: MIT
+# Maintainer: Matthew G. McGovern <matthew@mcgov.dev>
+#
+# "make arch-pkg" fills in the version and checksum and builds from the
+# tarball that "make dist" produced, so the package is of this tree. For the
+# AUR or an official repository, point source at a release instead:
+#   source=("$url/-/archive/v$pkgver/babysit-v$pkgver.tar.gz")
+# (the directory inside that tarball is babysit-v$pkgver), and refresh
+# sha256sums with updpkgsums.
+pkgname=babysit
+pkgver=@VERSION@
+pkgrel=1
+pkgdesc="Run a command detached, log it, and return early if it stalls"
+arch=('x86_64' 'aarch64')
+url="https://gitlab.com/mowws/babysit"
+license=('MIT')
+depends=('glibc' 'tar' 'gzip')
+makedepends=('clang')
+checkdepends=('procps-ng')
+# clang is the supported toolchain, and makepkg's -flto=auto would also need
+# an LLVM linker plugin; the program is ten small files, so do without.
+options=('!lto')
+source=("babysit-$pkgver.tar.gz")
+sha256sums=('@SHA256@')
+
+build() {
+  cd "babysit-$pkgver"
+  make CFLAGS="$CFLAGS" LDFLAGS="$LDFLAGS" PREFIX=/usr
+}
+
+check() {
+  cd "babysit-$pkgver"
+  make CFLAGS="$CFLAGS" LDFLAGS="$LDFLAGS" PREFIX=/usr test
+}
+
+package() {
+  cd "babysit-$pkgver"
+  make CFLAGS="$CFLAGS" LDFLAGS="$LDFLAGS" PREFIX=/usr \
+    UNITDIR=/usr/lib/systemd/user DESTDIR="$pkgdir" install
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  rm "$pkgdir/usr/share/doc/babysit/LICENSE"
+}

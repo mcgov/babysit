@@ -144,7 +144,6 @@ The test cases are in `tests/testcases/`, one file each, numbered in the
 order they run. Every file starts with a comment giving its goal, its
 procedure and what makes it fail, and can be run on its own.
 
-The CI jobs can be run on your own machine, each in a fresh container:
 `make perf` measures what `babysit` costs. It times a command that prints
 200, 200,000 and 2,000,000 lines (a light, a medium and a heavy load), on
 its own and under `babysit start`, and stores every timing in an SQLite
@@ -162,6 +161,7 @@ The performance cases never fail on speed, only if a run goes wrong, and
 they are not part of `make test` or of CI: timings from shared runners say
 little. It needs python3. See `tests/perf.sh --help`.
 
+The CI jobs can be run on your own machine, each in a fresh container:
 
 ```sh
 tests/ci-local.sh --list              # the jobs, and which can run here
@@ -183,8 +183,9 @@ and runs the suite, the sanitizers and the package build inside it. See
 ```sh
 make dist            # build/babysit-VERSION.tar.gz (source)
 make bindist         # build/babysit-VERSION-linux-ARCH.tar.gz
-make rpm             # needs rpmbuild
+make rpm             # needs rpmbuild; Fedora and openSUSE
 make deb             # needs dpkg-buildpackage and debhelper
+make arch-pkg        # on Arch Linux; needs makepkg, not as root
 gmake freebsd-pkg    # on FreeBSD; needs pkg
 ```
 
