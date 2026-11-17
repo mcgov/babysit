@@ -47,7 +47,7 @@ DISTFILES = Makefile LICENSE README.md precommit.sh .clang-format \
             docs tests packaging skills \
             debian .gitlab-ci.yml
 
-all: $(PROGS) $(BINDIR)/babysitd.service
+all: $(PROGS)
 
 $(BINDIR)/babysit: $(BABYSIT_SRCS) $(BABYSIT_HDRS)
 	@mkdir -p $(BINDIR)
@@ -64,10 +64,6 @@ $(BINDIR)/lockprobe: tests/lockprobe.c src/babysit.h
 $(BINDIR)/perftool: tests/perftool.c src/babysit.h
 	@mkdir -p $(BINDIR)
 	$(CC) -std=c99 $(CFLAGS) -o $@ tests/perftool.c $(LDFLAGS)
-
-$(BINDIR)/babysitd.service: src/babysitd/babysitd.service.in
-	@mkdir -p $(BINDIR)
-	sed 's|@BINDIR@|$(PREFIX)/bin|' src/babysitd/babysitd.service.in > $@
 
 # ---- tests ---------------------------------------------------------------
 
@@ -148,12 +144,25 @@ lint:
 install: all
 	mkdir -p $(DESTDIR)$(PREFIX)/bin $(DESTDIR)$(MANDIR)/man1 \
 	    $(DESTDIR)$(MANDIR)/man5 $(DESTDIR)$(MANDIR)/man8 $(DESTDIR)$(DOCDIR)
-	cp $(PROGS) $(DESTDIR)$(PREFIX)/bin/
+	# Copy beside, then rename into place: a babysitter started from the
+	# installed binary may be running, and a file that is being executed
+	# cannot be written over, only replaced.
+	for p in $(PROGS); do \
+	    cp $$p $(DESTDIR)$(PREFIX)/bin/.$${p##*/}.new && \
+	    mv -f $(DESTDIR)$(PREFIX)/bin/.$${p##*/}.new \
+	        $(DESTDIR)$(PREFIX)/bin/$${p##*/} || exit 1; \
+	done
 	cp docs/babysit.1 $(DESTDIR)$(MANDIR)/man1/
 	cp docs/babysit.conf.5 $(DESTDIR)$(MANDIR)/man5/
 	cp docs/babysitd.8 $(DESTDIR)$(MANDIR)/man8/
 	if [ -n "$(UNITDIR)" ]; then mkdir -p $(DESTDIR)$(UNITDIR) && \
-	    cp $(BINDIR)/babysitd.service $(DESTDIR)$(UNITDIR)/; fi
+	    sed 's|@BINDIR@|$(PREFIX)/bin|' src/babysitd/babysitd.service.in \
+	    > $(DESTDIR)$(UNITDIR)/babysitd.service; fi
+	# One completion file serves both commands; bash-completion finds it
+	# by the name of the command being completed, so it goes in twice.
+	if [ -n "$(COMPDIR)" ]; then mkdir -p $(DESTDIR)$(COMPDIR) && \
+	    cp completions/babysit.bash $(DESTDIR)$(COMPDIR)/babysit && \
+	    cp completions/babysit.bash $(DESTDIR)$(COMPDIR)/babysitd; fi
 	cp src/babysitd/babysit.conf README.md LICENSE $(DESTDIR)$(DOCDIR)/
 
 # The skill that teaches a coding agent to use babysit (skills/babysit/).
