@@ -14,8 +14,8 @@
 #   1. Plant a finished instance dated in the year 2099 and run babysit;
 #      then "babysitd --once"; then babysit again.
 #   2. The same for one dated today at 23:59, unless it is 23:59.
-#   3. The same for a later-dated instance whose log has a writer, before
-#      and after the writer goes away.
+#   3. Plant a later-dated instance whose log has a writer, and run babysit
+#      while it is written and after the writer has gone.
 #   4. With babysitd running as a service, plant another, run babysit, wait
 #      a moment and run it again.
 #
@@ -25,7 +25,9 @@
 #   - babysit removes or packs anything itself.
 #   - looking up an existing instance is refused as well.
 #   - babysit does not run normally once babysitd has packed the record.
-#   - babysitd packs a later-dated record that still has a writer.
+#   - a later-dated instance that is still being written makes babysit
+#     refuse, or is packed by babysitd.
+#   - it is not treated like any other later-dated record once finished.
 #   - the running service is not woken by the refusal.
 
 # shellcheck source=tests/lib.sh
@@ -66,14 +68,16 @@ fi
 plant "$d" 20991230/03/04/cccc busy
 "$lp" --hold 3 "$d/20991230/03/04/cccc/log" &
 sleep 0.5
-once
 b -- true >/dev/null 2>&1
-check "a later-dated record still being written is not packed: still 75" \
-    "$? $(cat "$d/20991230/03/04/cccc/log")" "75 busy"
+check "a later-dated instance still being written does not hold up a new one" $? 0
+once
+check "and babysitd leaves it where it is" "$(cat "$d/20991230/03/04/cccc/log")" busy
 wait
+b -- true >/dev/null 2>&1
+check "once it has finished it is in the way like any other: 75" $? 75
 once
 b -- true >/dev/null 2>&1
-check "once its writer is gone it is packed and babysit runs" $? 0
+check "and once packed, babysit runs again" $? 0
 
 "$bsd" --log-dir "$d" --config /dev/null -u 0 2>"$work/cb.svc" &
 sv=$!

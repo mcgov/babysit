@@ -22,8 +22,8 @@ files the log of each instance under
 by the minute it started in.
 .TP
 .B Archive past days
-Every day directory before today's, once nothing in it is being written, is
-packed into
+Every day directory before today's is packed, as far as it is finished,
+into
 .PP
 .RS
 .RS
@@ -42,9 +42,21 @@ Archives are made with
 .BR tar (1);
 if that fails the directory is left in place and a warning is logged.
 .IP
-A day is archived whole.
-While one command started that day is still logging, its day directory
-stays, with the finished logs beside it.
+An instance whose log is still being written is left out of the archive and
+stays exactly where it is, so its identifier goes on working; everything
+else from that day is archived without waiting for it.
+At each later pass the service looks again, and the first one that finds
+the instance finished archives it too, in an archive of its own for that
+day
+.RB ( .2 ,
+.B .3
+and so on).
+A command that runs for a week therefore keeps only its own log out of the
+archive for that week.
+"Finished" means that the babysitter has stopped writing the log, not that
+an exit status was recorded: a log can still be growing after its command
+has exited, and an instance whose babysitter was killed never gets a status
+at all.
 .TP
 .B Pack records dated later than now
 If the clock has been set back, the log directory holds records dated
@@ -59,10 +71,10 @@ is packed in place as
 .IB HH .tar.gz
 or
 .IB MM .tar.gz .
-One that is still being written is left, and
+An instance that is still being written is left in place, and
 .B babysit
-goes on refusing until its command has finished or the clock has caught up
-with it.
+does not hold it against a new one; it is packed, like any other, by the
+first pass that finds it finished.
 .TP
 .B Pack early when the disk fills up
 Whenever it wakes, the service checks how full the filesystem holding
@@ -70,10 +82,11 @@ Whenever it wakes, the service checks how full the filesystem holding
 is.
 At
 .B compact_at_disk_percent
-or more it does not wait for a day to be over: in the days that are still
-in place (today, and earlier days in which something is still being
-written) every hour that is over and has no writer is packed in place as
+or more it does not wait for today to be over either: every hour of today
+that is over is packed in place, as far as it is finished, as
 .IR YYYYmmdd / HH .tar.gz .
+An instance still being written stays in its hour directory and is packed
+later, as with days.
 Packing compresses logs; it does not delete any.
 On a filesystem that simply stays above the limit, this means that at every
 wake-up the logs of the hours finished since the last one move into
@@ -107,12 +120,23 @@ Archives and packed hours whose file is older than
 are deleted, as are finished logs that old which are still in a day
 directory because something else there is being written.
 .PP
-A log that still has a writer is never archived or deleted, and neither is
-the day or hour directory around it.
+In short: packing collects the logs of finished commands, whichever they
+are, and nothing else.
+The dates are only how the files are organised.
+A long-running command's log is not collected until the command has
+finished, however long ago it started, so it is not in the archive that was
+made for its day or hour if it was still running when that archive was
+made.
+The date in a tarball's name says when the runs inside it started; it does
+not promise that every run started then is inside.
+The ones that were still going are in a later tarball of the same date,
+with a number before the extension, or still in place.
+.PP
+A log that still has a writer is never archived or deleted.
 Any doubt counts as a writer: a log the service cannot open, and a log on
 a filesystem that cannot report locks (some network and FUSE filesystems),
-is left where it is.
-Such a directory is never packed or expired by the service.
+is left where it is, and where the service cannot look inside a directory
+at all it leaves the whole of it.
 Nothing created in the last two seconds is packed either, so that an
 instance which has made its directory but not yet opened its log does not
 find it gone.
@@ -287,6 +311,14 @@ which either happens completely or not at all.
 A run killed while removing it therefore never leaves a half-empty
 directory under its real name, which the next run would pack again over the
 complete tarball.
+.IP \(bu 2
+When only part of a directory can be packed, because something in it is
+still being written, the instances that went into the tarball are removed
+one at a time.
+A run killed in the middle of that leaves some of them in place; the next
+pass packs those again, into a further tarball.
+The same log can then be in two tarballs, but none is lost and no tarball
+is ever written over.
 .IP \(bu 2
 .B .partial
 files and

@@ -301,65 +301,6 @@ static inline int minute_path(time_t t, int utc, char *buf, size_t n) {
   return (tm && strftime(buf, n, "%Y%m%d/%H/%M", tm) > 0) ? 0 : -1;
 }
 
-/*
- * Is there a directory in DIR whose name IS_NAME accepts and which sorts
- * after REF? Its name is copied to FOUND.
- */
-static inline int later_entry(const char *dir, int (*is_name)(const char *),
-                              const char *ref, char *found, size_t n) {
-  char path[PATH_BUF + 300];
-  struct dirent *de;
-  struct stat sb;
-  DIR *d = opendir(dir);
-  int hit = 0;
-
-  if (!d)
-    return 0;
-  while (!hit && (de = readdir(d)) != NULL) {
-    if (!is_name(de->d_name) || strcmp(de->d_name, ref) <= 0)
-      continue;
-    snprintf(path, sizeof path, "%s/%s", dir, de->d_name);
-    if (stat(path, &sb) == 0 && S_ISDIR(sb.st_mode)) {
-      snprintf(found, n, "%s", de->d_name);
-      hit = 1;
-    }
-  }
-  closedir(d);
-  return hit;
-}
-
-/*
- * Does LOGDIR hold records dated later than MINUTE ("YYYYmmdd/HH/MM")? If
- * so the clock has been set back since they were filed (or the timezone
- * setting changed), and new records would be filed in among older ones that
- * claim to be newer. FOUND gets the first such directory, relative to
- * LOGDIR.
- */
-static inline int find_later(const char *logdir, const char *minute,
-                             char *found, size_t n) {
-  char day[9], hour[3], dir[PATH_BUF + 32], name[16];
-
-  memcpy(day, minute, 8);
-  day[8] = '\0';
-  memcpy(hour, minute + 9, 2);
-  hour[2] = '\0';
-  if (later_entry(logdir, is_day_name, day, name, sizeof name)) {
-    snprintf(found, n, "%s", name);
-    return 1;
-  }
-  snprintf(dir, sizeof dir, "%s/%s", logdir, day);
-  if (later_entry(dir, is_hour_name, hour, name, sizeof name)) {
-    snprintf(found, n, "%s/%s", day, name);
-    return 1;
-  }
-  snprintf(dir, sizeof dir, "%s/%s/%s", logdir, day, hour);
-  if (later_entry(dir, is_hour_name, minute + 12, name, sizeof name)) {
-    snprintf(found, n, "%s/%s/%s", day, hour, name);
-    return 1;
-  }
-  return 0;
-}
-
 /* ---------- who is still writing ---------- */
 
 static inline int lock_byte(int fd, off_t byte, short type) {
@@ -459,6 +400,102 @@ static inline int tree_has_writer(const char *dir) {
   if (nftw(dir, tree_writer_cb, 16, FTW_PHYS) < 0)
     return 1;
   return tree_busy;
+}
+
+/* ---------- records dated later than now ---------- */
+
+/*
+ * 1 if anything under DIR is finished: a log nobody is writing, or a
+ * tarball. That is what babysitd can pack away. An instance that is still
+ * being written does not count, and neither does one babysitd could not
+ * touch because its writer cannot be determined.
+ */
+static int tree_done;
+static inline int tree_finished_cb(const char *path, const struct stat *sb,
+                                   int flag, struct FTW *ftw) {
+  size_t len = strlen(path);
+
+  (void)sb;
+  if (flag != FTW_F)
+    return 0;
+  if ((strcmp(path + ftw->base, "log") == 0 && !log_has_writer(path)) ||
+      (len > 7 && strcmp(path + len - 7, ".tar.gz") == 0)) {
+    tree_done = 1;
+    return 1;
+  }
+  return 0;
+}
+
+static inline int tree_has_finished(const char *dir) {
+  tree_done = 0;
+  nftw(dir, tree_finished_cb, 16, FTW_PHYS);
+  return tree_done;
+}
+
+/*
+ * Is there a directory in DIR whose name IS_NAME accepts, which sorts
+ * after REF, and which holds something finished? Its name is copied to
+ * FOUND.
+ */
+static inline int later_entry(const char *dir, int (*is_name)(const char *),
+                              const char *ref, char *found, size_t n) {
+  char path[PATH_BUF + 300];
+  struct dirent *de;
+  struct stat sb;
+  DIR *d = opendir(dir);
+  int hit = 0;
+
+  if (!d)
+    return 0;
+  while (!hit && (de = readdir(d)) != NULL) {
+    if (!is_name(de->d_name) || strcmp(de->d_name, ref) <= 0)
+      continue;
+    snprintf(path, sizeof path, "%s/%s", dir, de->d_name);
+    if (stat(path, &sb) == 0 && S_ISDIR(sb.st_mode) &&
+        tree_has_finished(path)) {
+      snprintf(found, n, "%s", de->d_name);
+      hit = 1;
+    }
+  }
+  closedir(d);
+  return hit;
+}
+
+/*
+ * Does LOGDIR hold records dated later than MINUTE ("YYYYmmdd/HH/MM")? If
+ * so the clock has been set back since they were filed (or the timezone
+ * setting changed), and new records would be filed in among older ones that
+ * claim to be newer. FOUND gets the first such directory, relative to
+ * LOGDIR.
+ *
+ * Only finished records count. babysitd packs those away, after which a
+ * retry gets through; an instance that is still being written cannot be
+ * packed by anyone, and refusing on its account would only mean refusing
+ * for as long as its command cares to run.
+ */
+static inline int find_later(const char *logdir, const char *minute,
+                             char *found, size_t n) {
+  char day[9], hour[3], dir[PATH_BUF + 32], name[16];
+
+  memcpy(day, minute, 8);
+  day[8] = '\0';
+  memcpy(hour, minute + 9, 2);
+  hour[2] = '\0';
+  if (later_entry(logdir, is_day_name, day, name, sizeof name)) {
+    snprintf(found, n, "%s", name);
+    return 1;
+  }
+  snprintf(dir, sizeof dir, "%s/%s", logdir, day);
+  if (later_entry(dir, is_hour_name, hour, name, sizeof name)) {
+    snprintf(found, n, "%s/%s", day, name);
+    return 1;
+  }
+  snprintf(dir, sizeof dir, "%s/%s/%s", logdir, day, hour);
+  if (later_entry(dir, is_hour_name, minute + 12, name, sizeof name)) {
+    snprintf(found, n, "%s/%s/%s", day, hour, name);
+    return 1;
+  }
+  return 0;
 }
 
 static inline int remove_tree_cb(const char *path, const struct stat *sb,

@@ -352,7 +352,14 @@ Finished logs do not stay where they are for ever:
 packs past days into
 .IR LOGDIR /archive
 and deletes old ones.
-Without it nothing is packed or deleted, and logs simply accumulate.
+It only ever collects the logs of commands that have finished.
+The log of a command that is still running stays where it is, under its
+identifier, however long ago it was started, and is therefore missing from
+the archive made for its day if it had not finished by then; it is
+collected later, into a further archive for the same day.
+Without
+.BR babysitd (8)
+nothing is packed or deleted, and logs simply accumulate.
 .SH USING THE IDENTIFIER
 The identifier is what to keep.
 Everything else is asked for with it, when it is needed.
@@ -439,16 +446,22 @@ automatically should treat 75 as it would
 .BR EAGAIN :
 wait briefly, retry, and give up after a few attempts.
 .PP
-Status 75 persists in two cases.
-A record created in the last two seconds is not packed yet; the next retry
-gets through.
-A later-dated instance that is still running cannot be packed, because its
-log is in use and its identifier is its path:
-.B babysit
-keeps returning 75 until that command ends or the clock passes its date.
-The message on stderr names the directory, and
-.B "babysit check"
-tells whether an instance in it is running.
+A retry always gets through in the end.
+Only finished records count as being in the way, and those are exactly the
+ones
+.BR babysitd (8)
+can pack.
+An instance dated later than now that is still being written is not held
+against a new one: nobody could pack it, and refusing on its account would
+mean refusing for as long as its command cares to run.
+When it does finish, it becomes a finished later-dated record like any
+other, and the next
+.B "babysit start"
+may get one more 75 while the service packs it.
+The one thing a retry can still run into is a record finished in the last
+two seconds, which
+.B babysitd
+does not touch yet; the retry after that succeeds.
 .PP
 With
 .B "timezone = utc"

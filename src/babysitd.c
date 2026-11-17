@@ -12,18 +12,20 @@
  * <log-dir>/<YYYYmmdd>/<HH>/<MM>/<salt>/log (see babysit.h). At every
  * pass, babysitd does this:
  *
- *   1. Every day directory before today's in which nothing is being
- *      written any more is packed into
- *      <log-dir>/archive/babysit_logs_<YYYYmmdd>.tar.gz and removed. So is
- *      anything dated later than now, which is there because the clock was
- *      set back: later days go to the archive, later hours of today and
- *      later minutes of this hour are packed in place. babysit refuses to
- *      start anything (exit status 75) while such records are in the way.
+ *   1. Every day directory before today's is packed into
+ *      <log-dir>/archive/babysit_logs_<YYYYmmdd>.tar.gz and removed, as far
+ *      as it is finished: an instance whose log is still being written is
+ *      left out and stays in place, and goes into an archive of its own
+ *      (babysit_logs_<YYYYmmdd>.2.tar.gz) by the first pass that finds it
+ *      finished. The same is done for anything dated later than now, which
+ *      is there because the clock was set back: later days go to the
+ *      archive, later hours of today and later minutes of this hour are
+ *      packed in place. babysit refuses to start anything (exit status 75)
+ *      while such records are in the way.
  *   2. When the filesystem holding the logs is at least
- *      compact_at_disk_percent full, it does the same one level down for
- *      the days that are still there (today, and earlier days that still
- *      have a writer): every hour that is over and has no writer is packed
- *      into <YYYYmmdd>/<HH>.tar.gz.
+ *      compact_at_disk_percent full, it does not wait for today to be over
+ *      either: every hour of today that is over is packed, as far as it is
+ *      finished, into <YYYYmmdd>/<HH>.tar.gz.
  *   3. Archives and packed hours, and finished logs still lying in a day
  *      directory, older than max_age_days are deleted.
  *   4. When that filesystem is at least delete_at_disk_percent full (off by
@@ -394,13 +396,36 @@ static void discard(const char *path) {
     remove_tree(path);
 }
 
-/* tar -czf OUT -C DIR NAME */
-static int run_tar(const char *out, const char *dir, const char *name) {
+/*
+ * tar -czf OUT -C DIR [--exclude=...]... NAME
+ *
+ * EXCL holds NEXCL ready-made "--exclude=<path>" arguments, for what is
+ * still being written; they have to come before NAME to apply to it.
+ */
+static int run_tar(const char *out, const char *dir, const char *name,
+                   char **excl, size_t nexcl) {
+  const char **argv = (const char **)malloc((nexcl + 8) * sizeof *argv);
   int status, devnull;
-  pid_t pid = fork();
+  size_t i, n = 0;
+  pid_t pid;
 
-  if (pid < 0)
+  if (!argv)
     return -1;
+  argv[n++] = "tar";
+  argv[n++] = "-czf";
+  argv[n++] = out;
+  argv[n++] = "-C";
+  argv[n++] = dir;
+  for (i = 0; i < nexcl; i++)
+    argv[n++] = excl[i];
+  argv[n++] = name;
+  argv[n] = NULL;
+
+  pid = fork();
+  if (pid < 0) {
+    free((void *)argv);
+    return -1;
+  }
   if (pid == 0) {
     devnull = open("/dev/null", O_WRONLY);
     if (devnull >= 0)
@@ -408,22 +433,16 @@ static int run_tar(const char *out, const char *dir, const char *name) {
     /* Arguments go straight to tar, not through a shell, and callers
      * never pass a name that starts with '-'. */
     /* NOLINTNEXTLINE(clang-analyzer-optin.taint.GenericTaint) */
-    execlp("tar", "tar", "-czf", out, "-C", dir, name, (char *)NULL);
+    execvp("tar", (char *const *)argv);
     _exit(127);
   }
+  free((void *)argv);
   while (waitpid(pid, &status, 0) < 0)
     if (errno != EINTR)
       return -1;
   return (WIFEXITED(status) && WEXITSTATUS(status) == 0) ? 0 : -1;
 }
 
-/*
- * Make sure a finished tarball is on disk, and then that its new name is,
- * before the directory it replaces is removed: after a power failure the
- * removal must not be the only one of the three that happened. Not every
- * filesystem can sync a directory, so only the file's own sync is allowed
- * to fail the pack.
- */
 static int sync_file(const char *path) {
   int fd = open(path, O_WRONLY), rc;
 
@@ -449,8 +468,9 @@ static void sync_dir(const char *path) {
  * TMP. Returns -1, with nothing left behind, if that did not work.
  */
 static int pack(const char *tmp, const char *out, const char *home,
-                const char *parent, const char *name) {
-  if (run_tar(tmp, parent, name) < 0 || sync_file(tmp) < 0 ||
+                const char *parent, const char *name, char **excl,
+                size_t nexcl) {
+  if (run_tar(tmp, parent, name, excl, nexcl) < 0 || sync_file(tmp) < 0 ||
       rename(tmp, out) < 0) {
     unlink(tmp);
     return -1;
@@ -525,29 +545,166 @@ static int free_tarball_name(char *out, size_t n, const char *stem) {
   return stat(out, &sb) == 0 ? -1 : 0;
 }
 
-/* May DIR be packed: is it a directory nobody is writing in or just made? */
-static int is_settled(const char *dir) {
-  struct stat sb;
+/*
+ * What a look through a directory that is due for packing found: the
+ * instances whose log still has a writer, which have to stay, and what is
+ * finished and can go into the tarball, which is every other instance and
+ * every tarball made by an earlier, smaller packing.
+ */
+static struct {
+  char **live, **done;
+  size_t nlive, ndone;
+  int unsure; /* something could not be looked at: leave it all alone */
+} seen;
 
-  if (recently_touched(dir))
-    return 0;
-  prune_empty(dir); /* after the look at the clock: this touches DIR too */
-  if (stat(dir, &sb) < 0 || !S_ISDIR(sb.st_mode))
-    return 0; /* gone: there was nothing in it */
-  return !tree_has_writer(dir);
+static void seen_add(char ***list, size_t *n, const char *path, size_t len) {
+  char **grown = (char **)realloc((void *)*list, (*n + 1) * sizeof **list);
+  char *copy = malloc(len + 1);
+
+  if (grown)
+    *list = grown;
+  if (!grown || !copy) {
+    free(copy);
+    seen.unsure = 1;
+    return;
+  }
+  memcpy(copy, path, len);
+  copy[len] = '\0';
+  (*list)[(*n)++] = copy;
+}
+
+static void seen_clear(void) {
+  size_t i;
+
+  for (i = 0; i < seen.nlive; i++)
+    free(seen.live[i]);
+  for (i = 0; i < seen.ndone; i++)
+    free(seen.done[i]);
+  free((void *)seen.live);
+  free((void *)seen.done);
+  memset(&seen, 0, sizeof seen);
+}
+
+static int seen_cb(const char *path, const struct stat *sb, int flag,
+                   struct FTW *ftw) {
+  const char *base = path + ftw->base;
+  size_t len = strlen(path);
+
+  (void)sb;
+  if (flag == FTW_DNR || flag == FTW_NS) {
+    seen.unsure = 1;
+  } else if (flag == FTW_F && strcmp(base, "log") == 0 && ftw->base > 0) {
+    /* An instance is the directory its log is in. Any doubt about the
+     * writer counts as one (see log_has_writer). */
+    if (log_has_writer(path))
+      seen_add(&seen.live, &seen.nlive, path, (size_t)ftw->base - 1);
+    else
+      seen_add(&seen.done, &seen.ndone, path, (size_t)ftw->base - 1);
+  } else if (flag == FTW_F && len > 7 &&
+             strcmp(path + len - 7, ".tar.gz") == 0) {
+    seen_add(&seen.done, &seen.ndone, path, len);
+  }
+  return 0;
 }
 
 /*
- * Pack every day other than TODAY that is settled into the archive. Those
- * are the days that are over, and also any dated after today: the clock
- * has been set back since they were filed, and babysit starts nothing
- * until they are out of the way.
+ * Pack PARENT/NAME into STEM.tar.gz (or STEM.2.tar.gz and so on), which
+ * lives in HOME, and remove what was packed.
+ *
+ * If nothing in it is being written, that is the whole directory. If
+ * something is, the instances still being written are left out of the
+ * tarball and stay where they are, so that their identifiers go on
+ * working; they are packed by a later pass, once they have finished, into
+ * a tarball of their own. A command that runs for a week therefore does
+ * not keep the logs of everything else started that day unpacked.
+ *
+ * Returns 1 if a tarball was made (*LEFT is how many instances stayed
+ * behind, OUT its name), 0 if there was nothing to pack yet, -1 if packing
+ * failed, -2 if every tarball name is taken and -3 if HOME cannot be
+ * created.
+ */
+static int pack_finished(const char *parent, const char *name, const char *stem,
+                         const char *home, char *out, size_t outn,
+                         size_t *left) {
+  char from[PATH_BUF + 600], tmp[PATH_BUF + 700];
+  char **excl = NULL;
+  struct stat sb;
+  size_t i, nlive, ndone, skip = strlen(parent) + 1;
+  int rc;
+
+  snprintf(from, sizeof from, "%s/%s", parent, name);
+  if (recently_touched(from))
+    return 0;
+  prune_empty(from); /* after the look at the clock: this touches it too */
+  if (stat(from, &sb) < 0 || !S_ISDIR(sb.st_mode))
+    return 0; /* gone: there was nothing in it */
+
+  seen_clear();
+  if (nftw(from, seen_cb, 16, FTW_PHYS) < 0)
+    seen.unsure = 1;
+  if (seen.unsure || (seen.nlive > 0 && seen.ndone == 0)) {
+    seen_clear();
+    return 0; /* cannot tell, or nothing there has finished yet */
+  }
+  if (mkdirs(home) < 0) {
+    seen_clear();
+    return -3;
+  }
+  if (free_tarball_name(out, outn, stem) < 0) {
+    seen_clear();
+    return -2;
+  }
+  snprintf(tmp, sizeof tmp, "%s.partial", out);
+  *left = seen.nlive;
+
+  if (seen.nlive == 0) {
+    rc = pack(tmp, out, home, parent, name, NULL, 0);
+    if (rc == 0)
+      discard(from);
+    seen_clear();
+    return rc == 0 ? 1 : -1;
+  }
+
+  /* Leave out what is still being written, by its path below PARENT. */
+  nlive = seen.nlive;
+  ndone = seen.ndone;
+  excl = (char **)calloc(nlive, sizeof *excl);
+  rc = excl ? 0 : -1;
+  for (i = 0; rc == 0 && i < nlive; i++) {
+    size_t n = strlen(seen.live[i] + skip) + sizeof "--exclude=";
+
+    excl[i] = malloc(n);
+    if (excl[i])
+      snprintf(excl[i], n, "--exclude=%s", seen.live[i] + skip);
+    else
+      rc = -1;
+  }
+  if (rc == 0)
+    rc = pack(tmp, out, home, parent, name, excl, nlive);
+  /* Remove exactly what was found finished before the tarball was made,
+   * and nothing that has appeared since. */
+  for (i = 0; rc == 0 && i < ndone; i++)
+    remove_tree(seen.done[i]);
+  for (i = 0; excl && i < nlive; i++)
+    free(excl[i]);
+  free((void *)excl);
+  seen_clear();
+  return rc == 0 ? 1 : -1;
+}
+
+/*
+ * Pack every day other than TODAY into the archive, as far as it is
+ * finished. Those are the days that are over, and also any dated after
+ * today: the clock has been set back since they were filed, and babysit
+ * starts nothing until they are out of the way.
  */
 static void archive_days(const char *today) {
   char adir[PATH_BUF + 16], from[PATH_BUF + 300], stem[PATH_BUF + 400],
-      out[PATH_BUF + 420], tmp[PATH_BUF + 440];
+      out[PATH_BUF + 420];
   struct dirent *de;
   DIR *d = opendir(logdir);
+  size_t left = 0;
+  int rc;
 
   if (!d)
     return;
@@ -560,25 +717,22 @@ static void archive_days(const char *today) {
     if (!is_day_name(name) || strcmp(name, today) == 0)
       continue;
     snprintf(from, sizeof from, "%s/%s", logdir, name);
-    if (!is_settled(from))
-      continue;
-    if (mkdirs(adir) < 0) {
-      say(1, "cannot create %s: %s", adir, strerror(errno));
-      break;
-    }
     snprintf(stem, sizeof stem, "%s/babysit_logs_%s", adir, name);
-    if (free_tarball_name(out, sizeof out, stem) < 0) {
+    rc = pack_finished(logdir, name, stem, adir, out, sizeof out, &left);
+    if (rc == -3)
+      say(1, "cannot create %s: %s", adir, strerror(errno));
+    else if (rc == -2)
       say(1, "every archive name for %s is taken; %s left in place", name,
           from);
-      continue;
-    }
-    snprintf(tmp, sizeof tmp, "%s.partial", out);
-    if (pack(tmp, out, adir, logdir, name) < 0) {
+    else if (rc < 0)
       say(1, "could not archive %s (is tar installed?); left in place", from);
-      continue;
-    }
-    discard(from);
-    say(0, "archived the logs of %s to %s", name, out);
+    else if (rc > 0 && left > 0)
+      say(0,
+          "archived the finished logs of %s to %s; %lu still being written "
+          "stay in place",
+          name, out, (unsigned long)left);
+    else if (rc > 0)
+      say(0, "archived the logs of %s to %s", name, out);
   }
   closedir(d);
 }
@@ -586,33 +740,30 @@ static void archive_days(const char *today) {
 /*
  * Pack directories with two-digit names (hours in a day, minutes in an
  * hour) in place, DIR/<nn> into DIR/<nn>.tar.gz: those sorting before REF
- * if SIDE is negative, after it if positive, all of them if REF is NULL.
- * WHY starts the message that reports each one.
+ * if SIDE is negative, after it if positive. WHY starts the message that
+ * reports each one.
  */
 static time_t pack_retry_at;
 
 static void pack_children(const char *dir, const char *ref, int side,
                           const char *why) {
-  char from[PATH_BUF + 600], out[PATH_BUF + 620], tmp[PATH_BUF + 640];
+  char from[PATH_BUF + 600], out[PATH_BUF + 620];
   struct dirent *de;
   DIR *d = opendir(dir);
-  int cmp;
+  size_t left = 0;
+  int cmp, rc;
 
   if (!d)
     return;
   while ((de = readdir(d)) != NULL && time(NULL) >= pack_retry_at) {
     if (!is_hour_name(de->d_name))
       continue;
-    cmp = ref ? strcmp(de->d_name, ref) : side;
+    cmp = strcmp(de->d_name, ref);
     if (cmp == 0 || (cmp < 0) != (side < 0))
       continue;
     snprintf(from, sizeof from, "%s/%s", dir, de->d_name);
-    if (!is_settled(from))
-      continue;
-    if (free_tarball_name(out, sizeof out, from) < 0)
-      continue;
-    snprintf(tmp, sizeof tmp, "%s.partial", out);
-    if (pack(tmp, out, dir, dir, de->d_name) < 0) {
+    rc = pack_finished(dir, de->d_name, from, dir, out, sizeof out, &left);
+    if (rc == -1) {
       pack_retry_at = time(NULL) + RETRY_PACK_S;
       say(1,
           "could not pack %s (disk full, or tar missing?); it is "
@@ -620,24 +771,27 @@ static void pack_children(const char *dir, const char *ref, int side,
           from, RETRY_PACK_S / 60);
       break;
     }
-    discard(from);
-    say(1, "%s: packed %s into %s", why, from, out);
+    if (rc > 0 && left > 0)
+      say(1,
+          "%s: packed the finished logs of %s into %s; %lu still being "
+          "written stay in place",
+          why, from, out, (unsigned long)left);
+    else if (rc > 0)
+      say(1, "%s: packed %s into %s", why, from, out);
   }
   closedir(d);
 }
 
 /*
- * When the disk is filling up, do not wait for a day to be over: pack each
- * of its hours that is, in place, as <day>/<HH>.tar.gz. This reaches the
- * days that archive_days() had to leave: today, and other days in which
- * something is still being written.
+ * When the disk is filling up, do not wait for today to be over: pack each
+ * of its hours that is, in place, as <day>/<HH>.tar.gz. (Other days need
+ * no such help: archive_days() has already packed all of them that is
+ * finished.)
  */
 static void pack_finished_hours(const char *today, const char *hour,
                                 long limit) {
   char dir[PATH_BUF + 300], why[96];
-  struct dirent *de;
-  int pct, cmp;
-  DIR *d;
+  int pct;
 
   if (limit <= 0)
     return;
@@ -646,20 +800,8 @@ static void pack_finished_hours(const char *today, const char *hour,
     return;
   snprintf(why, sizeof why, "log filesystem is %d%% full (limit %ld%%)", pct,
            limit);
-  d = opendir(logdir);
-  if (!d)
-    return;
-  while ((de = readdir(d)) != NULL) {
-    if (!is_day_name(de->d_name))
-      continue;
-    cmp = strcmp(de->d_name, today);
-    snprintf(dir, sizeof dir, "%s/%s", logdir, de->d_name);
-    if (cmp < 0)
-      pack_children(dir, NULL, -1, why); /* all of its hours */
-    else if (cmp == 0)
-      pack_children(dir, hour, -1, why); /* those before now */
-  }
-  closedir(d);
+  snprintf(dir, sizeof dir, "%s/%s", logdir, today);
+  pack_children(dir, hour, -1, why);
 }
 
 /*
