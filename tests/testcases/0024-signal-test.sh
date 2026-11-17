@@ -26,6 +26,13 @@
 . "$(dirname "$0")/../lib.sh"
 
 sg() { "$bs" signal --log-dir "$work/s" "$@"; }
+# A process that has been killed but not yet collected by whoever inherited
+# it still has a pid; it is not running.
+running() {
+    local state
+    state=$(ps -o stat= -p "$1" 2>/dev/null | tr -d ' ')
+    [ -n "$state" ] && [ "${state#Z}" = "$state" ]
+}
 
 id=$("$bs" start --log-dir "$work/s" --expect ready -- \
     sh -c 'trap "echo got usr1" USR1; (trap "" USR1; exec sleep 30) & echo "kid $!"; echo ready; while :; do wait && break; done' 2>"$work/s1")
@@ -41,7 +48,7 @@ check "signal as sigterm: exit 0" $? 0
 sleep 0.5
 check "the command is gone" "$("$bs" check --log-dir "$work/s" "$id" | cut -d ' ' -f 1)" exited
 check "and so is the child it started: the whole group was signalled" \
-    "$(kill -0 "$kid" 2>/dev/null && echo alive || echo gone)" gone
+    "$(running "$kid" && echo alive || echo gone)" gone
 
 sg TERM "$id" 2>"$work/s2"
 check "signalling a finished instance: exit 1" $? 1
