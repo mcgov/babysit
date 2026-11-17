@@ -1,0 +1,6 @@
+0
+sh -c true
+Process created with pid 123
+OUT: hi
+ERR: oops
+Process exited with code 0

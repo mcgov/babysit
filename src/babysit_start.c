@@ -43,21 +43,17 @@ static void follow_log(int fd) {
       break;
 }
 
-/* babysit start [options] [--] command [args...] */
-int cmd_start(int argc, char **argv) {
-  const char *idle_s = NULL, *timeout_s = NULL, *dir = NULL, *v;
-  const char *config = NULL;
-  char logdir[PATH_BUF], cfg[PATH_BUF], child_id[ID_MAX];
-  char minute[ID_MAX];
-  char path[PATH_BUF + ID_MAX + 8];
-  char *cmdline, **cmd;
-  long long idle_ms = -1, timeout_ms = -1;
-  int detach = 0, follow = 0, follow_fd = -1, utc = 0, i, n, st;
-  int status_pipe[2];
-  struct pollfd waiting;
-  struct msg m;
-  pid_t pid, mid;
+/*
+ * The options of "start", up to the command. Returns 0 with O filled in,
+ * or -1 after complaining. --expect and --fixed are left in expect_pat and
+ * expect_fixed.
+ */
+int start_args(int argc, char **argv, struct start_opts *o) {
+  const char *v;
+  int i;
 
+  memset(o, 0, sizeof *o);
+  o->idle_ms = o->timeout_ms = -1;
   for (i = 1; i < argc; i++) {
     if (strcmp(argv[i], "--") == 0) {
       i++;
@@ -68,40 +64,70 @@ int cmd_start(int argc, char **argv) {
     if (opt_match("babysit", argc, argv, &i, "-e", "--expect", &v)) {
       expect_pat = v;
     } else if (opt_match("babysit", argc, argv, &i, "-i", "--idle", &v)) {
-      idle_s = v;
+      o->idle_s = v;
     } else if (opt_match("babysit", argc, argv, &i, "-t", "--timeout", &v)) {
-      timeout_s = v;
+      o->timeout_s = v;
     } else if (opt_match("babysit", argc, argv, &i, "-l", "--log-dir", &v)) {
-      dir = v;
+      o->dir = v;
     } else if (opt_match("babysit", argc, argv, &i, "-c", "--config", &v)) {
-      config = v;
+      o->config = v;
     } else if (opt_match("babysit", argc, argv, &i, "-F", "--fixed", NULL)) {
       expect_fixed = 1;
     } else if (opt_match("babysit", argc, argv, &i, "-d", "--detach", NULL)) {
-      detach = 1;
+      o->detach = 1;
     } else if (opt_match("babysit", argc, argv, &i, "-f", "--follow", NULL)) {
-      follow = 1;
+      o->follow = 1;
     } else {
       fprintf(stderr, "babysit: unknown option '%s'\n\n", argv[i]);
       usage(stderr);
-      return EXIT_USAGE;
+      return -1;
     }
   }
-  cmd = argv + i;
-  if (!*cmd) {
+  o->cmd = argv + i;
+  if (!*o->cmd) {
     fprintf(stderr, "babysit: no command given\n\n");
     usage(stderr);
-    return EXIT_USAGE;
+    return -1;
   }
 
-  if (idle_s && parse_interval(idle_s, &idle_ms) < 0) {
-    fprintf(stderr, "babysit: invalid --idle interval '%s'\n", idle_s);
-    return EXIT_USAGE;
+  if (o->idle_s && parse_interval(o->idle_s, &o->idle_ms) < 0) {
+    fprintf(stderr, "babysit: invalid --idle interval '%s'\n", o->idle_s);
+    return -1;
   }
-  if (timeout_s && parse_interval(timeout_s, &timeout_ms) < 0) {
-    fprintf(stderr, "babysit: invalid --timeout interval '%s'\n", timeout_s);
-    return EXIT_USAGE;
+  if (o->timeout_s && parse_interval(o->timeout_s, &o->timeout_ms) < 0) {
+    fprintf(stderr, "babysit: invalid --timeout interval '%s'\n", o->timeout_s);
+    return -1;
   }
+  return 0;
+}
+
+/* babysit start [options] [--] command [args...] */
+int cmd_start(int argc, char **argv) {
+  const char *dir, *config, *idle_s, *timeout_s;
+  char logdir[PATH_BUF], cfg[PATH_BUF], child_id[ID_MAX];
+  char minute[ID_MAX];
+  char path[PATH_BUF + ID_MAX + 8];
+  char *cmdline, **cmd;
+  long long idle_ms, timeout_ms;
+  int detach, follow, follow_fd = -1, utc = 0, n, st;
+  int status_pipe[2];
+  struct pollfd waiting;
+  struct start_opts o;
+  struct msg m;
+  pid_t pid, mid;
+
+  if (start_args(argc, argv, &o) < 0)
+    return EXIT_USAGE;
+  dir = o.dir;
+  config = o.config;
+  cmd = o.cmd;
+  idle_s = o.idle_s;
+  timeout_s = o.timeout_s;
+  idle_ms = o.idle_ms;
+  timeout_ms = o.timeout_ms;
+  detach = o.detach;
+  follow = o.follow;
+
   if (expect_pat && !expect_fixed) {
     int rc = regcomp(&expect_re, expect_pat, REG_EXTENDED | REG_NOSUB);
     if (rc != 0) {

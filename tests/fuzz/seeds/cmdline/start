@@ -1,0 +1,8 @@
+--idle
+1.5m
+-t=2h
+--detach
+--
+sh
+-c
+echo "hi there"; exit 3

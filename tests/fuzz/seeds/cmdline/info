@@ -1,0 +1,6 @@
+--pid
+-l=/x
+stdout
+stderr
+SIGTERM
+20261116/06/15/k3f9

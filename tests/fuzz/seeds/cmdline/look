@@ -1,0 +1,8 @@
+--log-dir
+/tmp/x
+20261116/06/15/k3f9
+--timeout
+30s
+--expect
+ready
+-F

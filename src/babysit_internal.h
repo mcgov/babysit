@@ -144,6 +144,13 @@ int instance_state(const struct instance *in, int *code);
 int request_signal(const struct instance *in, int sig);
 
 /* babysit_start.c */
+struct start_opts {
+  const char *dir, *config, *idle_s, *timeout_s;
+  char **cmd;                    /* the command and its arguments */
+  long long idle_ms, timeout_ms; /* -1 if not given */
+  int detach, follow;
+};
+int start_args(int argc, char **argv, struct start_opts *o);
 int cmd_start(int argc, char **argv);
 
 /* babysit_inspect.c */

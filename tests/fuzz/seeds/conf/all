@@ -1,0 +1,9 @@
+# comment
+timezone = utc
+max_age_days = 7
+check_interval = 1d
+archive_after_days = 1
+archive_on_usage_percentage = 90
+delete_at_disk_percent = 95
+bogus
+what = 1

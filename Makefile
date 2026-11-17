@@ -43,7 +43,7 @@ BABYSIT_SRCS = src/babysit.c src/babysit_cmdline.c src/babysit_time.c \
 BABYSIT_HDRS = src/babysit.h src/babysit_internal.h
 
 PROGS    = $(BINDIR)/babysit $(BINDIR)/babysitd
-TESTBINS = $(BINDIR)/lockprobe
+TESTBINS = $(BINDIR)/lockprobe $(BINDIR)/faultinject.so
 MANPAGES = docs/babysit.1 docs/babysitd.8 docs/babysit.conf.5
 DISTFILES = Makefile LICENSE README.md precommit.sh .clang-format \
             .clang-tidy src \
@@ -63,6 +63,13 @@ $(BINDIR)/babysitd: src/babysitd/babysitd.c src/babysit.h
 $(BINDIR)/lockprobe: tests/lockprobe.c src/babysit.h
 	@mkdir -p $(BINDIR)
 	$(CC) -std=c99 $(CFLAGS) -o $@ tests/lockprobe.c $(LDFLAGS)
+
+# Preloaded by the fault tests to make one library call fail. Built with
+# flags of its own: it must not carry a sanitizer or coverage runtime.
+$(BINDIR)/faultinject.so: tests/faultinject.c
+	@mkdir -p $(BINDIR)
+	$(CC) -std=c99 -O1 -g -Wall -Wextra -Werror -fPIC -shared -o $@ \
+	    tests/faultinject.c -ldl
 
 $(BINDIR)/perftool: tests/perftool.c src/babysit.h
 	@mkdir -p $(BINDIR)
@@ -92,7 +99,8 @@ check-asan check-ubsan check-tsan: check-%:
 	rm -rf $(BUILD)/$*
 	mkdir -p $(BUILD)/$*/reports
 	$(MAKE) BINDIR=$(BUILD)/$* \
-	    CFLAGS="$(SAN_CFLAGS) -fsanitize=$(SAN_$*)" all $(BUILD)/$*/lockprobe
+	    CFLAGS="$(SAN_CFLAGS) -fsanitize=$(SAN_$*)" all $(BUILD)/$*/lockprobe \
+	    $(BUILD)/$*/faultinject.so
 	ASAN_OPTIONS=log_path=$(CURDIR)/$(BUILD)/$*/reports/asan \
 	UBSAN_OPTIONS=log_path=$(CURDIR)/$(BUILD)/$*/reports/ubsan:print_stacktrace=1 \
 	TSAN_OPTIONS=log_path=$(CURDIR)/$(BUILD)/$*/reports/tsan \
@@ -113,7 +121,8 @@ coverage:
 	mkdir -p $(COV)/raw
 	$(MAKE) BINDIR=$(COV) CFLAGS="-O0 -g -Wall -Wextra -pedantic -Werror \
 	    -fprofile-instr-generate \
-	    -fcoverage-mapping -DBABYSIT_COVERAGE" all $(COV)/lockprobe
+	    -fcoverage-mapping -DBABYSIT_COVERAGE" all $(COV)/lockprobe \
+	    $(COV)/faultinject.so
 	LLVM_PROFILE_FILE=$(CURDIR)/$(COV)/raw/babysit-%m.profraw \
 	    bash tests/run.sh --bindir $(COV)
 	llvm-profdata merge -sparse $(COV)/raw/*.profraw -o $(COV)/babysit.profdata
@@ -132,8 +141,14 @@ coverage:
 check-freebsd-vm:
 	bash tests/freebsd-vm.sh
 
+# libFuzzer targets with AddressSanitizer, on a small RAM disk that the run
+# fills up (see tests/fuzz/run.sh --help). Needs clang.
+FUZZ_SECONDS ?= 60
+fuzz:
+	bash tests/fuzz/run.sh --seconds $(FUZZ_SECONDS)
+
 lint:
-	shellcheck -x --severity=warning tests/run.sh tests/lib.sh \
+	shellcheck -x --severity=warning tests/fuzz/run.sh tests/run.sh tests/lib.sh \
 	    tests/freebsd-vm.sh tests/ci-local.sh tests/testcases/*-test.sh \
 	    tests/perf.sh tests/perflib.sh tests/perfcases/*-test.sh \
 	    completions/babysit.bash \
@@ -293,5 +308,5 @@ clean:
 	rm -rf bin $(BUILD)
 
 .PHONY: all test check perf check-asan check-ubsan check-tsan check-freebsd-vm \
-        coverage lint \
+        coverage fuzz lint \
         install install-user uninstall uninstall-user install-skill dist bindist rpm deb arch-pkg freebsd-pkg clean
