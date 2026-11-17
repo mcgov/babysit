@@ -42,7 +42,8 @@ static void random_salt(char *salt) {
  * mkdir() of the last component is what makes it unique: if it is taken,
  * another salt is tried.
  */
-int new_instance(const char *logdir, const char *minute, char *id, size_t idn) {
+int new_instance(const char *logdir, const char *minute, char *child_id,
+                 size_t size) {
   char salt[SALT_LEN + 1], dir[PATH_BUF + ID_MAX + 8];
   int tries, n;
 
@@ -57,7 +58,7 @@ int new_instance(const char *logdir, const char *minute, char *id, size_t idn) {
     random_salt(salt);
     snprintf(dir, sizeof dir, "%s/%s/%s", logdir, minute, salt);
     if (mkdir(dir, 0777) == 0) {
-      snprintf(id, idn, "%s/%s", minute, salt);
+      snprintf(child_id, size, "%s/%s", minute, salt);
       return 0;
     }
     if (errno != EEXIST)
@@ -69,11 +70,11 @@ int new_instance(const char *logdir, const char *minute, char *id, size_t idn) {
 
 /* Remove an instance that never got as far as a log, and whatever of the
  * directories above it that leaves empty. */
-void drop_instance(const char *logdir, const char *id) {
+void drop_instance(const char *logdir, const char *child_id) {
   char path[PATH_BUF + ID_MAX + 8];
   int i;
 
-  snprintf(path, sizeof path, "%s/%s", logdir, id);
+  snprintf(path, sizeof path, "%s/%s", logdir, child_id);
   remove_tree(path);
   for (i = 0; i < 3; i++) {
     *strrchr(path, '/') = '\0';
@@ -108,30 +109,30 @@ long logged_pid(const char *path) {
 
 /* Find instance ID under --log-dir DIR. Complains and returns -1 if ID is
  * not an identifier or there is no such instance. */
-int find_instance(const char *dir, const char *id, struct instance *in) {
+int find_instance(const char *dir, const char *child_id, struct instance *in) {
   char logdir[PATH_BUF];
   struct stat sb;
 
-  if (!id) {
+  if (!child_id) {
     fprintf(stderr, "babysit: no instance identifier given\n");
     return -1;
   }
-  if (!is_instance_id(id)) {
+  if (!is_instance_id(child_id)) {
     fprintf(stderr,
             "babysit: '%s' is not an instance identifier "
             "(YYYYmmdd/HH/MM/xxxx)\n",
-            id);
+            child_id);
     return -1;
   }
   if (resolve_logdir(dir, logdir, sizeof logdir) < 0)
     return -1;
-  snprintf(in->dir, sizeof in->dir, "%s/%s", logdir, id);
+  snprintf(in->dir, sizeof in->dir, "%s/%s", logdir, child_id);
   snprintf(in->log, sizeof in->log, "%s/log", in->dir);
   if (stat(in->log, &sb) < 0) {
     fprintf(stderr,
             "babysit: no instance %s under %s (babysitd may have packed "
             "it)\n",
-            id, logdir);
+            child_id, logdir);
     return -1;
   }
   return 0;

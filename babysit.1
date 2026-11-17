@@ -9,18 +9,18 @@ babysit \- run a command detached, log it, and return early if it stalls
 .RI [ args ...]
 .br
 .B babysit watch
-.I id
+.I child_id
 .RI [ options ]
 .br
 .B babysit check
-.I id
+.I child_id
 .br
 .B babysit info
-.I id
+.I child_id
 .RB [ \-\-pid " | " \-\-log " | " \-\-exit\-code ]
 .br
 .B babysit signal
-.I signal id
+.I signal child_id
 .SH DESCRIPTION
 .B babysit start
 runs
@@ -29,7 +29,9 @@ in the background under a babysitter process, writes its output to a log
 file and echoes it on stderr.
 On stdout it prints one line and nothing else: the
 .I identifier
-of this run, such as
+of this run (the
+.I child_id
+the other commands take), such as
 .BR 20261116/06/15/k3f9 ,
 which is all a caller needs to find the log and the command again:
 .PP

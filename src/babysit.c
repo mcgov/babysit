@@ -27,7 +27,8 @@
  * <log-dir>/<instance>/log. See babysit.h.
  *
  * Stdout carries the identifier and nothing else, so that
- * id=$(babysit start ...) is all a caller needs to find the instance again.
+ * child_id=$(babysit start ...) is all a caller needs to find the instance
+ * again.
  *
  * The babysitter records the command's exit status in <instance>/exit_code
  * and takes signals for it from <instance>/ctl. The other subcommands
@@ -42,22 +43,23 @@ void usage(FILE *f) {
   fprintf(
       f,
       "Usage: babysit start [options] [--] command [args...]\n"
-      "       babysit watch ID [options]\n"
-      "       babysit check ID\n"
-      "       babysit info ID [--pid | --log | --exit-code]\n"
-      "       babysit signal SIGNAL ID\n"
+      "       babysit watch CHILD_ID [options]\n"
+      "       babysit check CHILD_ID\n"
+      "       babysit info CHILD_ID [--pid | --log | --exit-code]\n"
+      "       babysit signal SIGNAL CHILD_ID\n"
       "\n"
       "start runs COMMAND detached from this terminal/pipe and logs its "
       "output to\n"
-      "LOGDIR/ID/log, where ID identifies this run: the minute it started "
-      "and four\n"
-      "random characters, for example 20261116/06/15/k3f9. ID is printed on "
-      "stdout,\n"
-      "alone; the command's output is echoed on stderr, each line prefixed "
-      "with\n"
-      "'OUT: ' (stdout) or 'ERR: ' (stderr). When the command exits, its "
-      "status is\n"
-      "recorded in LOGDIR/ID/exit_code. The other commands take that ID.\n"
+      "LOGDIR/CHILD_ID/log, where CHILD_ID identifies this run: the minute "
+      "it\n"
+      "started and four random characters, for example 20261116/06/15/k3f9.\n"
+      "CHILD_ID is printed on stdout, alone; the command's output is echoed "
+      "on\n"
+      "stderr, each line prefixed with 'OUT: ' (stdout) or 'ERR: ' (stderr). "
+      "When\n"
+      "the command exits, its status is recorded in "
+      "LOGDIR/CHILD_ID/exit_code.\n"
+      "The other commands take that CHILD_ID.\n"
       "\n"
       "By default start waits for the command and returns its exit status. "
       "The\n"

@@ -20,13 +20,14 @@
  */
 #define WATCH_TICK_MS 100
 
-static int watch_fail(const struct instance *in, const char *id,
+static int watch_fail(const struct instance *in, const char *child_id,
                       const char *onfail, int sig, int status) {
   if (onfail) {
     if (request_signal(in, sig) == 0)
-      fprintf(stderr, "babysit: %s: sent %s to the command\n", id, onfail);
+      fprintf(stderr, "babysit: %s: sent %s to the command\n", child_id,
+              onfail);
     else
-      fprintf(stderr, "babysit: %s: could not send %s: not running\n", id,
+      fprintf(stderr, "babysit: %s: could not send %s: not running\n", child_id,
               onfail);
   }
   return status;
@@ -34,7 +35,7 @@ static int watch_fail(const struct instance *in, const char *id,
 
 int cmd_watch(int argc, char **argv) {
   static char buf[4 * (PREFIX_LEN + LINE_MAX_ + 1)];
-  const char *ops[1] = {NULL}, *id;
+  const char *ops[1] = {NULL}, *child_id;
   long long idle_ms = -1, timeout_ms = -1, start, last, now;
   struct timespec tick = {0, WATCH_TICK_MS * 1000000L};
   struct instance in;
@@ -46,7 +47,7 @@ int cmd_watch(int argc, char **argv) {
 
   if (look_args("watch", argc, argv, 1, 0, &o, ops, 1) < 0)
     return EXIT_USAGE;
-  id = ops[0];
+  child_id = ops[0];
   if (o.idle_s && parse_interval(o.idle_s, &idle_ms) < 0) {
     fprintf(stderr, "babysit: invalid --idle interval '%s'\n", o.idle_s);
     return EXIT_USAGE;
@@ -70,7 +71,7 @@ int cmd_watch(int argc, char **argv) {
       return EXIT_USAGE;
     }
   }
-  if (find_instance(o.dir, id, &in) < 0)
+  if (find_instance(o.dir, child_id, &in) < 0)
     return EXIT_USAGE;
   fd = open(in.log, O_RDONLY);
   if (fd < 0 || fstat(fd, &sb) < 0) {
@@ -104,7 +105,7 @@ int cmd_watch(int argc, char **argv) {
                     : regexec(&expect_re, line + PREFIX_LEN, 0, NULL, 0) == 0;
         }
         if (hit) {
-          fprintf(stderr, "babysit: %s: expected output seen\n", id);
+          fprintf(stderr, "babysit: %s: expected output seen\n", child_id);
           return 0;
         }
         pos += (off_t)n;
@@ -124,7 +125,7 @@ int cmd_watch(int argc, char **argv) {
         ending = 1;
         continue;
       }
-      fprintf(stderr, "babysit: %s: exited with status %d%s\n", id, code,
+      fprintf(stderr, "babysit: %s: exited with status %d%s\n", child_id, code,
               expect_pat ? " before the expected output" : "");
       return (expect_pat && code == 0) ? 1 : code;
     }
@@ -132,19 +133,19 @@ int cmd_watch(int argc, char **argv) {
       fprintf(stderr,
               "babysit: %s: the babysitter is gone and left no exit "
               "status; see the log\n",
-              id);
+              child_id);
       return EXIT_USAGE;
     }
     now = now_ms();
     if (timeout_ms > 0 && now - start >= timeout_ms) {
-      fprintf(stderr, "babysit: %s: timed out after %s; still running\n", id,
-              o.timeout_s);
-      return watch_fail(&in, id, o.onfail, sig, EXIT_TIMEOUT);
+      fprintf(stderr, "babysit: %s: timed out after %s; still running\n",
+              child_id, o.timeout_s);
+      return watch_fail(&in, child_id, o.onfail, sig, EXIT_TIMEOUT);
     }
     if (idle_ms > 0 && now - last >= idle_ms) {
       fprintf(stderr, "babysit: %s: stalled: no output for %s; still running\n",
-              id, o.idle_s);
-      return watch_fail(&in, id, o.onfail, sig, EXIT_STALLED);
+              child_id, o.idle_s);
+      return watch_fail(&in, child_id, o.onfail, sig, EXIT_STALLED);
     }
     nanosleep(&tick, NULL);
   }

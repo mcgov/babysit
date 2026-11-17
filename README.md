@@ -65,10 +65,10 @@ babysit check "$bbid" || echo "server is dead"
 | Command | What it does |
 |---|---|
 | `babysit start [options] -- command` | run a command, print its identifier |
-| `babysit watch ID [options]` | attach to a running instance and return as `start` would |
-| `babysit check ID` | exit 0 and print `running`, or exit 1 and print `exited N` |
-| `babysit info ID [--pid\|--log\|--exit-code]` | where the log is, the state, the pid while it runs |
-| `babysit signal SIGNAL ID` | have the babysitter signal the command |
+| `babysit watch CHILD_ID [options]` | attach to a running instance and return as `start` would |
+| `babysit check CHILD_ID` | exit 0 and print `running`, or exit 1 and print `exited N` |
+| `babysit info CHILD_ID [--pid\|--log\|--exit-code]` | where the log is, the state, the pid while it runs |
+| `babysit signal SIGNAL CHILD_ID` | have the babysitter signal the command |
 
 When the command exits, its status is written to `exit_code` next to the
 log. A pid is only ever given out while the command is running, and

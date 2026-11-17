@@ -129,10 +129,11 @@ void babysitter(const char *dir, char **cmd, const char *cmdline, int detach,
                 long long idle_ms, long long timeout_ms);
 
 /* babysit_instance.c */
-int new_instance(const char *logdir, const char *minute, char *id, size_t idn);
-void drop_instance(const char *logdir, const char *id);
+int new_instance(const char *logdir, const char *minute, char *child_id,
+                 size_t size);
+void drop_instance(const char *logdir, const char *child_id);
 long logged_pid(const char *path);
-int find_instance(const char *dir, const char *id, struct instance *in);
+int find_instance(const char *dir, const char *child_id, struct instance *in);
 int instance_state(const struct instance *in, int *code);
 int request_signal(const struct instance *in, int sig);
 

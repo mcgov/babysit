@@ -267,9 +267,9 @@ static inline int is_salt_name(const char *s) {
 }
 
 /* Is ID "<YYYYmmdd>/<HH>/<MM>/<salt>" and nothing else? */
-static inline int is_instance_id(const char *id) {
-  return digits_then(id, 8, '/') && digits_then(id + 9, 2, '/') &&
-         digits_then(id + 12, 2, '/') && is_salt_name(id + 15);
+static inline int is_instance_id(const char *child_id) {
+  return digits_then(child_id, 8, '/') && digits_then(child_id + 9, 2, '/') &&
+         digits_then(child_id + 12, 2, '/') && is_salt_name(child_id + 15);
 }
 
 /* Is NAME "babysit_logs_<something>.tar.gz", the archive of a day? */

@@ -30,7 +30,7 @@ static int read_msg(int fd, struct msg *m) {
 int cmd_start(int argc, char **argv) {
   const char *idle_s = NULL, *timeout_s = NULL, *dir = NULL, *v;
   const char *config = NULL;
-  char logdir[PATH_BUF], cfg[PATH_BUF], id[ID_MAX];
+  char logdir[PATH_BUF], cfg[PATH_BUF], child_id[ID_MAX];
   char minute[ID_MAX], later[ID_MAX];
   char path[PATH_BUF + ID_MAX + 8];
   char *cmdline, **cmd;
@@ -122,18 +122,18 @@ int cmd_start(int argc, char **argv) {
     perror("babysit: malloc");
     return EXIT_USAGE;
   }
-  if (new_instance(logdir, minute, id, sizeof id) < 0) {
+  if (new_instance(logdir, minute, child_id, sizeof child_id) < 0) {
     fprintf(stderr, "babysit: cannot create a log directory under %s: %s\n",
             logdir, strerror(errno));
     free(cmdline);
     return EXIT_USAGE;
   }
-  snprintf(path, sizeof path, "%s/%s", logdir, id);
+  snprintf(path, sizeof path, "%s/%s", logdir, child_id);
 
   if (pipe(status_pipe) < 0) {
     perror("babysit: pipe");
     free(cmdline);
-    drop_instance(logdir, id);
+    drop_instance(logdir, child_id);
     return EXIT_USAGE;
   }
   fflush(NULL);
@@ -144,7 +144,7 @@ int cmd_start(int argc, char **argv) {
   if (mid < 0) {
     perror("babysit: fork");
     free(cmdline);
-    drop_instance(logdir, id);
+    drop_instance(logdir, child_id);
     return EXIT_USAGE;
   }
   if (mid == 0) {
@@ -168,28 +168,28 @@ int cmd_start(int argc, char **argv) {
 
   if (read_msg(status_pipe[0], &m) < 0) {
     fprintf(stderr, "babysit: the babysitter failed to start\n");
-    drop_instance(logdir, id);
+    drop_instance(logdir, child_id);
     return EXIT_USAGE;
   }
   if (m.type == MSG_ERR_EXEC) {
     /* Nothing ran, but the instance is there to say so. */
-    puts(id);
+    puts(child_id);
     fflush(stdout);
-    fprintf(stderr, "babysit: %s: cannot execute '%s': %s\n", id, cmd[0],
+    fprintf(stderr, "babysit: %s: cannot execute '%s': %s\n", child_id, cmd[0],
             strerror(m.value));
     return m.value == ENOENT ? 127 : 126;
   }
   if (m.type != MSG_START) {
     fprintf(stderr, "babysit: cannot create %s/log: %s\n", path,
             strerror(m.value));
-    drop_instance(logdir, id);
+    drop_instance(logdir, child_id);
     return EXIT_USAGE;
   }
   pid = (pid_t)m.value;
 
   /* The command is running: from here on stdout says which instance it
    * is, and says nothing else. */
-  puts(id);
+  puts(child_id);
   fflush(stdout);
 
   /* Now just wait to be told why to return. */
@@ -197,7 +197,7 @@ int cmd_start(int argc, char **argv) {
     fprintf(stderr,
             "babysit: %s: lost contact with the babysitter; see the "
             "log\n",
-            id);
+            child_id);
     return EXIT_USAGE;
   }
   switch (m.type) {
@@ -207,25 +207,25 @@ int cmd_start(int argc, char **argv) {
     fprintf(stderr,
             "babysit: %s: expected output seen; pid %ld continues in the "
             "background\n",
-            id, (long)pid);
+            child_id, (long)pid);
     return 0;
   case MSG_STALL:
     fprintf(stderr,
             "babysit: %s: stalled: no output for %s; pid %ld is still "
             "running\n",
-            id, idle_s, (long)pid);
+            child_id, idle_s, (long)pid);
     return EXIT_STALLED;
   case MSG_TIMEOUT:
     fprintf(stderr,
-            "babysit: %s: timed out after %s; pid %ld is still running\n", id,
-            timeout_s, (long)pid);
+            "babysit: %s: timed out after %s; pid %ld is still running\n",
+            child_id, timeout_s, (long)pid);
     return EXIT_TIMEOUT;
   case MSG_SIGNAL:
-    fprintf(stderr, "babysit: %s: killed by signal %d%s\n", id, m.value,
+    fprintf(stderr, "babysit: %s: killed by signal %d%s\n", child_id, m.value,
             expect_pat ? " before the expected output" : "");
     return 128 + m.value;
   case MSG_EXIT:
-    fprintf(stderr, "babysit: %s: exited with code %d%s\n", id, m.value,
+    fprintf(stderr, "babysit: %s: exited with code %d%s\n", child_id, m.value,
             expect_pat ? " before the expected output" : "");
     return (expect_pat && m.value == 0) ? 1 : m.value;
   default:
