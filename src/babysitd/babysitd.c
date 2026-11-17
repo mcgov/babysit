@@ -64,7 +64,7 @@
  *
  * Archives are made by running tar(1).
  */
-#include "babysit.h"
+#include "../babysit.h"
 #include <stdarg.h>
 #include <sys/statvfs.h>
 

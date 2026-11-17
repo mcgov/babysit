@@ -26,7 +26,9 @@ BUILD    = build
 
 # The sources are in src/. babysit is built from babysit.c, which holds
 # main(), and the babysit_*.c files beside it; babysit_internal.h is what
-# they share. babysitd is one file. babysit.h is shared by both programs.
+# they share. babysitd is one file, in src/babysitd/ together with its
+# service unit and the sample configuration file. babysit.h is shared by
+# both programs.
 BABYSIT_SRCS = src/babysit.c src/babysit_cmdline.c src/babysit_time.c \
                src/babysit_start.c src/babysit_sitter.c \
                src/babysit_output.c src/babysit_control.c \
@@ -39,7 +41,7 @@ TESTBINS = $(BINDIR)/lockprobe
 MANPAGES = babysit.1 babysitd.8 babysit.conf.5
 DISTFILES = Makefile LICENSE README.md precommit.sh .clang-format \
             .clang-tidy src \
-            $(MANPAGES) babysit.conf babysitd.service.in tests packaging \
+            $(MANPAGES) tests packaging \
             debian .gitlab-ci.yml
 
 all: $(PROGS) $(BINDIR)/babysitd.service
@@ -48,17 +50,17 @@ $(BINDIR)/babysit: $(BABYSIT_SRCS) $(BABYSIT_HDRS)
 	@mkdir -p $(BINDIR)
 	$(CC) -std=c99 $(CFLAGS) -o $@ $(BABYSIT_SRCS) $(LDFLAGS)
 
-$(BINDIR)/babysitd: src/babysitd.c src/babysit.h
+$(BINDIR)/babysitd: src/babysitd/babysitd.c src/babysit.h
 	@mkdir -p $(BINDIR)
-	$(CC) -std=c99 $(CFLAGS) -o $@ src/babysitd.c $(LDFLAGS)
+	$(CC) -std=c99 $(CFLAGS) -o $@ src/babysitd/babysitd.c $(LDFLAGS)
 
 $(BINDIR)/lockprobe: tests/lockprobe.c src/babysit.h
 	@mkdir -p $(BINDIR)
 	$(CC) -std=c99 $(CFLAGS) -o $@ tests/lockprobe.c $(LDFLAGS)
 
-$(BINDIR)/babysitd.service: babysitd.service.in
+$(BINDIR)/babysitd.service: src/babysitd/babysitd.service.in
 	@mkdir -p $(BINDIR)
-	sed 's|@BINDIR@|$(PREFIX)/bin|' babysitd.service.in > $@
+	sed 's|@BINDIR@|$(PREFIX)/bin|' src/babysitd/babysitd.service.in > $@
 
 # ---- tests ---------------------------------------------------------------
 
@@ -92,7 +94,7 @@ check-asan check-ubsan check-tsan: check-%:
 COVERAGE_MIN ?= 0
 COV = $(BUILD)/coverage
 COV_OBJECTS = $(COV)/babysit -object $(COV)/babysitd
-COV_SOURCES = $(BABYSIT_SRCS) src/babysitd.c src/babysit.h
+COV_SOURCES = $(BABYSIT_SRCS) src/babysitd/babysitd.c src/babysit.h
 
 coverage:
 	rm -rf $(COV)
@@ -138,7 +140,7 @@ install: all
 	cp babysitd.8 $(DESTDIR)$(MANDIR)/man8/
 	if [ -n "$(UNITDIR)" ]; then mkdir -p $(DESTDIR)$(UNITDIR) && \
 	    cp $(BINDIR)/babysitd.service $(DESTDIR)$(UNITDIR)/; fi
-	cp babysit.conf README.md LICENSE $(DESTDIR)$(DOCDIR)/
+	cp src/babysitd/babysit.conf README.md LICENSE $(DESTDIR)$(DOCDIR)/
 
 # ---- packages ------------------------------------------------------------
 
