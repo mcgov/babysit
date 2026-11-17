@@ -172,6 +172,13 @@ docker, and python3 with the yaml module. See `tests/ci-local.sh --help`.
 and runs the suite, the sanitizers and the package build inside it. See
 `tests/freebsd-vm.sh --help`.
 
+## Tab completion
+
+`make install` also installs bash completion for `babysit` and `babysitd`:
+commands, options, signal names, and the identifiers of your runs, newest
+first. It needs the bash-completion package, and takes effect in a new
+shell. To try it without installing: `source completions/babysit.bash`.
+
 ## For coding agents
 
 `skills/babysit/` is a skill that teaches a coding agent (Claude Code, for

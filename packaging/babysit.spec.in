@@ -71,6 +71,8 @@ make test CFLAGS="%{optflags}" LDFLAGS="%{build_ldflags}" PREFIX=%{_prefix}
 %{_mandir}/man5/babysit.conf.5*
 %{_mandir}/man8/babysitd.8*
 %{_userunitdir}/babysitd.service
+%{_datadir}/bash-completion/completions/babysit
+%{_datadir}/bash-completion/completions/babysitd
 
 %changelog
 * Sun Nov 15 2026 Matthew G. McGovern <matthew@mcgov.dev> - 0.1.0-1

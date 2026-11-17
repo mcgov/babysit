@@ -19,6 +19,9 @@ UNITDIR ?= $(PREFIX)/lib/systemd/user
 else
 UNITDIR ?=
 endif
+# Where bash looks for completions (the bash-completion package's
+# directory). An empty COMPDIR installs none.
+COMPDIR ?= $(PREFIX)/share/bash-completion/completions
 # Where "make install-skill" puts the agent skill: your personal Claude Code
 # skills by default. For one project, pass SKILLDIR=/path/to/project/.claude/skills.
 SKILLDIR ?= $(HOME)/.claude/skills
@@ -44,7 +47,7 @@ TESTBINS = $(BINDIR)/lockprobe
 MANPAGES = docs/babysit.1 docs/babysitd.8 docs/babysit.conf.5
 DISTFILES = Makefile LICENSE README.md precommit.sh .clang-format \
             .clang-tidy src \
-            docs tests packaging skills \
+            docs tests packaging skills completions \
             debian .gitlab-ci.yml
 
 all: $(PROGS)
@@ -133,6 +136,7 @@ lint:
 	shellcheck -x --severity=warning tests/run.sh tests/lib.sh \
 	    tests/freebsd-vm.sh tests/ci-local.sh tests/testcases/*-test.sh \
 	    tests/perf.sh tests/perflib.sh tests/perfcases/*-test.sh \
+	    completions/babysit.bash \
 	    precommit.sh
 	@for m in $(MANPAGES); do \
 	    out=$$(groff -man -Tutf8 -ww -z $$m 2>&1); \
@@ -155,6 +159,10 @@ install: all
 	cp docs/babysit.1 $(DESTDIR)$(MANDIR)/man1/
 	cp docs/babysit.conf.5 $(DESTDIR)$(MANDIR)/man5/
 	cp docs/babysitd.8 $(DESTDIR)$(MANDIR)/man8/
+	# The unit names the installed babysitd, so it is written here, from
+	# the PREFIX of this install, and not at build time: a unit built with
+	# one PREFIX and installed with another points at a file that is not
+	# there, and the service fails to start.
 	if [ -n "$(UNITDIR)" ]; then mkdir -p $(DESTDIR)$(UNITDIR) && \
 	    sed 's|@BINDIR@|$(PREFIX)/bin|' src/babysitd/babysitd.service.in \
 	    > $(DESTDIR)$(UNITDIR)/babysitd.service; fi
