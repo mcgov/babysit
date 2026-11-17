@@ -8,7 +8,7 @@
 #   once, and it then does everything it would do at a scheduled wake-up.
 #
 # Procedure:
-#   1. Start babysitd with its default six-hour interval.
+#   1. Start babysitd with its default interval of one day.
 #   2. Lay out a past day and an archive that is past the age limit.
 #   3. Write to the FIFO and give it two seconds.
 #
@@ -20,7 +20,7 @@
 # shellcheck source=tests/lib.sh
 . "$(dirname "$0")/../lib.sh"
 
-"$bsd" --log-dir "$work/k" --max-age-days 5 --config /dev/null -u 0 2>"$work/e15" &
+"$bsd" --log-dir "$work/k" --max-age-days 5 --config /dev/null -D 0 -u 0 2>"$work/e15" &
 kd=$!
 sleep 0.5
 plant "$work/k" 20240101/11/12/aaaa earlier

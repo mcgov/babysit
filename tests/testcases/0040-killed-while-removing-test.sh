@@ -40,9 +40,9 @@ sleep 0.5
 
 # The first run clears the leftovers, which touches the day; the day is
 # packed by the next pass that finds it quiet.
-"$bsd" --once --log-dir "$d" --config /dev/null -u 0 2>"$work/kr.err"
+"$bsd" --once --log-dir "$d" --config /dev/null -D 0 -u 0 2>"$work/kr.err"
 settle "$d/20230102"
-"$bsd" --once --log-dir "$d" --config /dev/null -u 0 2>>"$work/kr.err"
+"$bsd" --once --log-dir "$d" --config /dev/null -D 0 -u 0 2>>"$work/kr.err"
 check "the archive still holds both logs, and that day has only the one" \
     "$(tar -tzf "$d/archive/babysit_logs_20230101.tar.gz" | grep -c '/log$') $(ls -d "$d/archive"/*20230101* | count)" "2 1"
 check "the packed hour, now inside its day's archive, still holds both logs" \
@@ -52,7 +52,7 @@ check "the half-removed directories are gone" \
 check "the instance being written was left where it is" "$(cat "$d/20230102/08/09/eeee/log")" live
 wait
 settle "$d/20230102"
-"$bsd" --once --log-dir "$d" --config /dev/null -u 0 2>>"$work/kr.err"
+"$bsd" --once --log-dir "$d" --config /dev/null -D 0 -u 0 2>>"$work/kr.err"
 check "in the end there are the archives and nothing else" \
     "$(ls "$d" | tr '\n' ' '; ls "$d/archive" | tr '\n' ' ')" \
     "archive babysit_logs_20230101.tar.gz babysit_logs_20230102.2.tar.gz babysit_logs_20230102.tar.gz "

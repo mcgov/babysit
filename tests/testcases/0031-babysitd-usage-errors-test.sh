@@ -27,13 +27,13 @@ check "babysitd --version" "$("$bsd" --version)" "babysitd $version"
 check "babysitd: unknown option is a usage error" $? 2
 "$bsd" --log-dir >/dev/null 2>&1
 check "babysitd: option without its value is a usage error" $? 2
-"$bsd" --once --log-dir "$work/dc" --config /dev/null --max-age-days x 2>/dev/null
+"$bsd" --once --log-dir "$work/dc" --config /dev/null -D 0 --max-age-days x 2>/dev/null
 check "babysitd: bad --max-age-days is rejected" $? 2
-"$bsd" --once --log-dir "$work/dc" --config /dev/null --check-interval soon 2>/dev/null
+"$bsd" --once --log-dir "$work/dc" --config /dev/null -D 0 --check-interval soon 2>/dev/null
 check "babysitd: bad --check-interval is rejected" $? 2
-"$bsd" --once --log-dir "$work/dc" --config /dev/null --archive-on-usage-percentage 101 2>/dev/null
+"$bsd" --once --log-dir "$work/dc" --config /dev/null -D 0 --archive-on-usage-percentage 101 2>/dev/null
 check "babysitd: disk percent over 100 is rejected" $? 2
-"$bsd" --once --log-dir "$work/dc" --config /dev/null --archive-on-usage-percentage x 2>/dev/null
+"$bsd" --once --log-dir "$work/dc" --config /dev/null -D 0 --archive-on-usage-percentage x 2>/dev/null
 check "babysitd: bad disk percent is rejected" $? 2
 "$bsd" --once --log-dir "$work/dc" --config "$work/no-such.conf" 2>"$work/d2e"
 check "babysitd: a named config file must exist" $? 2
@@ -41,7 +41,7 @@ has "babysitd: missing config is explained" "$work/d2e" 'cannot read'
 env -u HOME -u XDG_CONFIG_HOME "$bsd" --once 2>"$work/d3"
 check "babysitd: no HOME and no --log-dir is an error" $? 2
 : >"$work/blocker"
-"$bsd" --once --log-dir "$work/blocker/x" --config /dev/null 2>/dev/null
+"$bsd" --once --log-dir "$work/blocker/x" --config /dev/null -D 0 2>/dev/null
 check "babysitd: uncreatable log directory is an error" $? 2
 
 finish

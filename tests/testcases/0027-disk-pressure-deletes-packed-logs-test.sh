@@ -6,7 +6,7 @@
 # Goal:
 #   With delete_at_disk_percent set and the filesystem that full, babysitd
 #   deletes packed logs (archives and packed hours) oldest first, and
-#   nothing else. It is off by default.
+#   nothing else. Setting it to 0 turns it off.
 #
 # Procedure:
 #   1. Lay out two archives and two packed hours with distinct ages, a
@@ -38,8 +38,8 @@ touch -t "$(ago 400)" "$work/dp/archive/babysit_logs_20200101.tar.gz"
 touch -t "$(ago 300)" "$work/dp/$today/00.tar.gz"
 touch -t "$(ago 200)" "$work/dp/archive/babysit_logs_20210101.tar.gz"
 touch -t "$(ago 100)" "$work/dp/$today/01.tar.gz"
-"$bsd" --once --log-dir "$work/dp" --config /dev/null -u 0 2>"$work/dp1"
-check "delete: off by default" "$(find "$work/dp" -name '*.tar.gz' | count)" 4
+"$bsd" --once --log-dir "$work/dp" --config /dev/null -D 0 -u 0 2>"$work/dp1"
+check "delete: off when set to 0" "$(find "$work/dp" -name '*.tar.gz' | count)" 4
 "$bsd" --once --log-dir "$work/dp" --config /dev/null -u 0 --delete-at-disk-percent 100 2>"$work/dp2"
 check "delete: nothing is deleted below the limit" "$(find "$work/dp" -name '*.tar.gz' | count)" 4
 printf 'delete_at_disk_percent = 1\narchive_on_usage_percentage = 0\n' >"$work/dp.conf"

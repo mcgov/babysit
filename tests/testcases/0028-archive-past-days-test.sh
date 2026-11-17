@@ -33,20 +33,20 @@ plant "$work/d2" "$day/08/09/aaaa" x
 live=$(logof "$work/o10")
 "$bs" start --log-dir "$work/d2" -- true >"$work/o10b" 2>/dev/null
 done_log=$(logof "$work/o10b")
-"$bsd" --once --log-dir "$work/d2" --config /dev/null -u 0 2>/dev/null
+"$bsd" --once --log-dir "$work/d2" --config /dev/null -D 0 -u 0 2>/dev/null
 tarball="$work/d2/archive/babysit_logs_$day.tar.gz"
 check "babysitd: past day packed as babysit_logs_<day>.tar.gz" \
     "$(tar -xzOf "$tarball" "$day/08/09/aaaa/log" 2>/dev/null)" x
 check "babysitd: archived day directory removed" "$([ -e "$work/d2/$day" ] && echo present || echo gone)" gone
 check "babysitd: today left in place" "$([ -e "$live" ] && [ -e "$done_log" ] && echo kept)" kept
 plant "$work/d2" "$day/10/11/bbbb" again
-"$bsd" --once --log-dir "$work/d2" --config /dev/null -u 0 2>/dev/null
+"$bsd" --once --log-dir "$work/d2" --config /dev/null -D 0 -u 0 2>/dev/null
 check "babysitd: never overwrites an archive" \
     "$(ls "$work/d2/archive" | tr '\n' ' ')" "babysit_logs_$day.2.tar.gz babysit_logs_$day.tar.gz "
 
 for i in $(seq 3 99); do echo "kept $i" >"$work/d2/archive/babysit_logs_$day.$i.tar.gz"; done
 plant "$work/d2" "$day/12/13/cccc" third
-"$bsd" --once --log-dir "$work/d2" --config /dev/null -u 0 2>"$work/d2.err"
+"$bsd" --once --log-dir "$work/d2" --config /dev/null -D 0 -u 0 2>"$work/d2.err"
 check "babysitd: with every archive name taken, nothing is overwritten or removed" \
     "$(cat "$work/d2/archive/babysit_logs_$day.99.tar.gz" "$work/d2/$day/12/13/cccc/log" | tr '\n' ' ')" \
     "kept 99 third "

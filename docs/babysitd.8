@@ -11,7 +11,7 @@ looks after the log directory used by
 It is meant to run as a systemd user service.
 It does not poll: it sleeps for
 .B check_interval
-(6 hours by default), does the things below when it wakes, and goes
+(one day by default), does the things below when it wakes, and goes
 back to sleep.
 It can be woken early; see
 .BR "EARLY REQUESTS" .
@@ -98,10 +98,9 @@ tarballs; see
 .BR "READING PACKED LOGS" .
 .TP
 .B Delete under disk pressure
-This is off unless
+When the filesystem is at least
 .B delete_at_disk_percent
-is set.
-When the filesystem is at least that full, the service works out how much
+full (95 by default; 0 turns this off), the service works out how much
 must go to bring usage back under the limit, and deletes packed logs one at
 a time, oldest first, until that much has gone or none are left.
 It goes by the sizes of the files it deletes and does not measure the
@@ -210,13 +209,13 @@ Overrides
 .B max_age_days
 from the configuration file.
 0 keeps logs forever.
-Default: 30.
+Default: 7.
 .TP
 .BI "\-i, \-\-check\-interval " T
 Overrides
 .B check_interval
 from the configuration file.
-Default: 6h.
+Default: 1d.
 .TP
 .BI "\-A, \-\-archive\-after\-days " N
 Overrides
@@ -237,7 +236,7 @@ Overrides
 .B delete_at_disk_percent
 from the configuration file.
 0 disables.
-Default: 0.
+Default: 95.
 .TP
 .B \-1, \-\-once
 Do the housekeeping once, then exit.

@@ -23,7 +23,7 @@
 . "$(dirname "$0")/../lib.sh"
 
 d="$work/wp"
-"$bsd" --log-dir "$d" --config /dev/null -u 0 --check-interval 1s 2>"$work/wp.err" &
+"$bsd" --log-dir "$d" --config /dev/null -D 0 -u 0 --check-interval 1s 2>"$work/wp.err" &
 sv=$!
 sleep 0.5
 rm -rf "$d"

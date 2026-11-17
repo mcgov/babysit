@@ -74,7 +74,7 @@ or sooner if the disk reaches
 .B max_age_days
 Delete archived logs and finished logs older than this many days.
 0 keeps them forever.
-Default: 30.
+Default: 7.
 .TP
 .B delete_at_disk_percent
 When that filesystem is at least this full, in percent, delete packed logs
@@ -84,12 +84,12 @@ Live log directories are never deleted.
 This is the only setting that removes logs before they reach
 .BR max_age_days .
 If the disk is full of other files it will delete every packed log without
-bringing usage under the limit, so it is disabled unless set.
-It is best set above
+bringing usage under the limit; set it to 0 where that is not wanted.
+It is best kept above
 .BR archive_on_usage_percentage ,
 so that compression is tried first.
 0 disables.
-Default: 0.
+Default: 95.
 .TP
 .B check_interval
 How often the service wakes up to do its housekeeping when nothing asks for
@@ -103,7 +103,7 @@ suffix (seconds if there is none).
 .BR babysit (1)
 wakes the service itself when it needs something packed before it can
 start, so this can stay long.
-Default: 6h.
+Default: 1d.
 .PP
 Command-line options of
 .B babysitd

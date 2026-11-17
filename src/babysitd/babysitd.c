@@ -30,12 +30,12 @@
  *      into <YYYYmmdd>/<HH>.tar.gz.
  *   3. Archives and packed hours, and finished logs still lying in a day
  *      directory, older than max_age_days are deleted.
- *   4. When that filesystem is at least delete_at_disk_percent full (off by
+ *   4. When that filesystem is at least delete_at_disk_percent full (95 by
  *      default), it deletes packed logs, oldest first, until enough has
  *      gone to bring usage back under the limit or none are left. Only
  *      tarballs are deleted: never a live log directory.
  *
- * It does not poll. It sleeps for check_interval (6 hours by default) and
+ * It does not poll. It sleeps for check_interval (one day by default) and
  * does all of the above when it wakes. Writing anything to the FIFO
  * <log-dir>/.request wakes it early for the same pass.
  *
@@ -168,12 +168,12 @@ static void usage(FILE *f) {
          "                           or $HOME/.config/babysit/babysit.conf)\n"
          "  -a, --max-age-days N     delete archives and finished logs older "
          "than N\n"
-         "                           days; 0 keeps them forever (default: 30)\n"
+         "                           days; 0 keeps them forever (default: 7)\n"
          "  -i, --check-interval T   how often to wake up and do the "
          "housekeeping when\n"
          "                           nothing asks for it sooner; a number with "
          "an\n"
-         "                           s, m, h or d suffix (default: 6h)\n"
+         "                           s, m, h or d suffix (default: 1d)\n"
          "  -A, --archive-after-days N\n"
          "                           archive the finished logs of a day once "
          "it is N\n"
@@ -192,7 +192,7 @@ static void usage(FILE *f) {
          "more,\n"
          "                           delete packed logs, oldest first, until "
          "it is\n"
-         "                           not; 0 disables (default: 0)\n"
+         "                           not; 0 disables (default: 95)\n"
          "  -1, --once               do the housekeeping once, then exit\n"
          "  -V, --version            show the version\n"
          "  -h, --help               show this help\n"
@@ -1148,7 +1148,7 @@ int main(int argc, char **argv) {
   const char *disk_opt = NULL, *delete_opt = NULL, *after_opt = NULL;
   const char *v;
   char cfg[PATH_BUF], cwd[PATH_BUF];
-  long max_age = 30, interval_s = 6L * 3600, disk_pct = 90, delete_pct = 0;
+  long max_age = 7, interval_s = 86400, disk_pct = 90, delete_pct = 95;
   int once = 0, i, n;
   time_t next_full, now;
   struct sigaction sa;

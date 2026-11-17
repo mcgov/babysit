@@ -35,7 +35,7 @@
 
 d="$work/cb"
 b() { "$bs" start --log-dir "$d" "$@"; }
-once() { "$bsd" --once --log-dir "$d" --config /dev/null -u 0 2>>"$work/cb.err"; }
+once() { "$bsd" --once --log-dir "$d" --config /dev/null -D 0 -u 0 2>>"$work/cb.err"; }
 
 first=$(b -- true 2>/dev/null)
 plant "$d" 20991231/01/02/aaaa future
@@ -79,7 +79,7 @@ once
 b -- true >/dev/null 2>&1
 check "and once packed, babysit runs again" $? 0
 
-"$bsd" --log-dir "$d" --config /dev/null -u 0 2>"$work/cb.svc" &
+"$bsd" --log-dir "$d" --config /dev/null -D 0 -u 0 2>"$work/cb.svc" &
 sv=$!
 sleep 0.5
 plant "$d" 20991229/05/06/dddd again

@@ -37,7 +37,7 @@ if [ "$now" = 00 ]; then
 fi
 prev=$(printf '%02d' $((10#$now - 1)))
 d="$work/ph"
-once() { "$bsd" --once --log-dir "$d" --config /dev/null "$@" 2>>"$work/ph.err"; }
+once() { "$bsd" --once --log-dir "$d" --config /dev/null -D 0 "$@" 2>>"$work/ph.err"; }
 
 plant "$d" "$today/$prev/04/aaaa" earlier
 plant "$d" "$today/$prev/05/bbbb" live

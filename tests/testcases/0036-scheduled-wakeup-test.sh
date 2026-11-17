@@ -20,7 +20,7 @@
 # shellcheck source=tests/lib.sh
 . "$(dirname "$0")/../lib.sh"
 
-"$bsd" --log-dir "$work/sv3" --config /dev/null --check-interval 1s --max-age-days 5 2>"$work/d9" &
+"$bsd" --log-dir "$work/sv3" --config /dev/null -D 0 --check-interval 1s --max-age-days 5 2>"$work/d9" &
 sv=$!
 sleep 0.5
 plant "$work/sv3" 20220101/00/01/aaaa z

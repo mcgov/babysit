@@ -35,7 +35,7 @@ has "config: ~/.config is the fallback" "$work/d6" "unknown key 'from_home'"
 check "babysitd: default log dir is under HOME" "$([ -e "$work/dhome/.local/var/log/babysit/.lock" ] && echo y)" y
 env -u XDG_CONFIG_HOME HOME="$work/dhome2" "$bsd" --once 2>/dev/null
 check "babysitd: a missing default config is fine" $? 0
-(cd "$work" && "$bsd" --once --log-dir reld --config /dev/null 2>/dev/null)
+(cd "$work" && "$bsd" --once --log-dir reld --config /dev/null -D 0 2>/dev/null)
 check "babysitd: relative --log-dir is resolved against the cwd" "$([ -e "$work/reld/.lock" ] && echo y)" y
 
 finish

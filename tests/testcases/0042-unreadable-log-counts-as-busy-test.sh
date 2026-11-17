@@ -37,7 +37,7 @@ plant "$d" "$today/03/05/cccc" c
 chmod 000 "$d/20230101/01/02/aaaa/log" "$d/$today/03/04/bbbb/log"
 touch -t "$old10d" "$d/$today/03/04/bbbb/log" "$d/$today/03/04/bbbb"
 
-"$bsd" --once --log-dir "$d" --config /dev/null -u 0 --max-age-days 1 2>"$work/ub.err"
+"$bsd" --once --log-dir "$d" --config /dev/null -D 0 -u 0 --max-age-days 1 2>"$work/ub.err"
 check "the day with an unreadable log is not archived" \
     "$([ -d "$d/20230101" ] && [ ! -e "$d/archive" ] && echo left)" left
 check "archiving it was not even attempted" "$(grep -c 'could not' "$work/ub.err")" 0
@@ -46,7 +46,7 @@ check "the old unreadable log is not expired" \
 
 chmod 644 "$d/20230101/01/02/aaaa/log" "$d/$today/03/04/bbbb/log"
 touch -t "$old10d" "$d/$today/03/04/bbbb/log"
-"$bsd" --once --log-dir "$d" --config /dev/null -u 0 --max-age-days 1 2>>"$work/ub.err"
+"$bsd" --once --log-dir "$d" --config /dev/null -D 0 -u 0 --max-age-days 1 2>>"$work/ub.err"
 check "once readable, the day is archived and the old log expired" \
     "$(ls "$d/archive" | tr '\n' ' '; ls "$d/$today/03" | tr '\n' ' ')" "babysit_logs_20230101.tar.gz 05 "
 

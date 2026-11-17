@@ -24,12 +24,12 @@
 . "$(dirname "$0")/../lib.sh"
 
 mkdir -p "$work/sv/.request"                      # a directory where the FIFO should be
-"$bsd" --log-dir "$work/sv" --config /dev/null 2>"$work/d8" &
+"$bsd" --log-dir "$work/sv" --config /dev/null -D 0 2>"$work/d8" &
 sv=$!
 sleep 0.7; kill "$sv"; wait "$sv"
 check "babysitd: SIGTERM is a clean exit" $? 0
 has "babysitd: unusable FIFO is reported" "$work/d8" 'is not usable'
-"$bsd" --log-dir "$work/sv2" --config /dev/null 2>/dev/null &
+"$bsd" --log-dir "$work/sv2" --config /dev/null -D 0 2>/dev/null &
 sv=$!
 sleep 0.5; kill -INT "$sv"; wait "$sv"
 check "babysitd: SIGINT is a clean exit" $? 0

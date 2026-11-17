@@ -29,9 +29,9 @@ realtar=$(command -v tar)
 printf '#!/bin/sh\n"%s" "$@" || exit 1\nsleep 2\n' "$realtar" >"$work/bin/tar"
 chmod +x "$work/bin/tar"
 
-PATH="$work/bin:$PATH" "$bsd" --once --log-dir "$work/ti" --config /dev/null -u 0 2>"$work/t1" &
+PATH="$work/bin:$PATH" "$bsd" --once --log-dir "$work/ti" --config /dev/null -D 0 -u 0 2>"$work/t1" &
 sleep 0.5
-PATH="$work/bin:$PATH" "$bsd" --once --log-dir "$work/ti" --config /dev/null -u 0 2>"$work/t2"
+PATH="$work/bin:$PATH" "$bsd" --once --log-dir "$work/ti" --config /dev/null -D 0 -u 0 2>"$work/t2"
 wait
 check "neither instance failed to pack" \
     "$(cat "$work/t1" "$work/t2" | grep -c 'could not')" 0

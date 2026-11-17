@@ -28,7 +28,7 @@
 . "$(dirname "$0")/../lib.sh"
 
 d="$work/lk2"
-once() { "$bsd" --once --log-dir "$d" --config /dev/null -u 0 "$@" 2>>"$work/lk2.err"; }
+once() { "$bsd" --once --log-dir "$d" --config /dev/null -D 0 -u 0 "$@" 2>>"$work/lk2.err"; }
 first="$d/archive/babysit_logs_20230101.tar.gz"
 
 plant "$d" 20230101/03/04/aaaa live

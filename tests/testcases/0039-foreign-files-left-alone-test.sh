@@ -34,7 +34,7 @@ plant "$d" 20230101/03/04/bbbb old
 touch -t "$old10d" "$d/archive/holiday.tar.gz" "$d/archive/notes.txt" \
     "$d/$today/backup.tar.gz" "$d/$today/notes.txt"
 
-"$bsd" --once --log-dir "$d" --config /dev/null -u 0 --max-age-days 1 \
+"$bsd" --once --log-dir "$d" --config /dev/null -D 0 -u 0 --max-age-days 1 \
     --delete-at-disk-percent 1 2>"$work/ff.err"
 check "unrelated directories are still there" \
     "$(cat "$d/myproject/src/main.c" "$d/2024-notes/todo" | tr '\n' ' ')" "precious note "
