@@ -1,6 +1,6 @@
 ---
 name: babysit
-description: Run long-running, slow or possibly-hanging shell commands under `babysit` so a tool call can never wait forever. Use this whenever you are about to start a dev server, database, watcher or any process that should keep running after you return; whenever you run a build, test suite, migration, download or script that may take more than a minute or might hang; whenever you need to wait for a "ready" line before carrying on; and whenever you need to check on, read the output of, or stop something you started earlier. Reach for it even if the user only says "start the server", "run the tests in the background" or "kick off the build" — if `babysit` is installed, prefer it over `&`, `nohup`, `sleep` loops, or `tail -f | grep`. In particular, use it anywhere you would otherwise start a process and then find it again with `pgrep`, `pidof`, `ps | grep` or `pkill`: the `babysit` pattern is likely to be more reliable in every such case.
+description: Run long-running, slow or possibly-hanging shell commands under `babysit` so a tool call can never wait forever. Use this whenever you are about to start a dev server, database, watcher or any process that should keep running after you return; whenever you run a build, test suite, migration, download or script that may take more than a minute or might hang; whenever you need to wait for a "ready" line before carrying on; and whenever you need to check on, read the output of, or stop something you started earlier. Reach for it even if the user only says "start the server", "run the tests in the background" or "kick off the build" — if `babysit` is installed, prefer it over `&`, `nohup`, `sleep` loops, or `tail -f | grep`. In particular, use it anywhere you would otherwise start a process and then find it again with `pgrep`, `pidof`, `ps | grep` or `pkill`: the `babysit` pattern is likely to be more reliable in every such case. Also consult it when writing or editing a script that may take more than a minute to run, for how to make that script log so that it can be watched.
 ---
 
 # babysit
@@ -121,21 +121,31 @@ line; add `--fixed` to match a plain substring.
 ### Run something long, and come back when it is finished or stuck
 
 ```sh
-bbid=$(babysit start --detach -- make test)
-babysit watch "$bbid" --idle 3m --timeout 20m >/dev/null
+bbid=$(babysit start --idle 30s --timeout 20m -- make test)
 rc=$?
 babysit cat "$bbid" | tail -n 40
 ```
 
-`watch` returns exactly as `start` would have: the command's own status
-when it exits, 125 if it has printed nothing for three minutes, 124 after
-twenty. It prints the lines it sees on stdout, hence the `>/dev/null`. Set
-`--timeout` below the time limit of your own tool call, so that it is
-`babysit` that returns and tells you where things stand, rather than your
-tool call being cut off.
+`start` does the waiting itself: it returns the command's own status when
+it exits, 125 if it has printed nothing for thirty seconds, 124 after
+twenty minutes. Set `--timeout` below the time limit of your own tool call,
+so that it is `babysit` that returns and tells you where things stand,
+rather than your tool call being cut off.
 
-If it returns 124 or 125 the command is still running. Look at the tail of
-its output and decide: `watch` it again for longer, or stop it.
+If it returns 124 or 125 the command is still running. You do not have to
+sit and wait for it. Go and do something else, then come back and ask:
+
+```sh
+babysit info "$bbid"               # state, and exit status once it has one
+babysit cat "$bbid" | tail -n 40   # what it has printed since
+```
+
+That is usually all you need, and it is cheaper than `babysit watch`:
+`info` and `cat` answer at once and return, where `watch` holds a tool
+call open and keeps looking at the log until something happens. Reach for
+`watch` only when there is nothing useful to do in the meantime and you
+want to be told the moment the command finishes or goes quiet (see "Which
+operation to use" below).
 
 ### Look in on something you started earlier
 
@@ -159,6 +169,71 @@ This signals the command and everything it started. Use it instead of
 `kill`: it needs no pid and cannot hit the wrong process. Follow with
 `babysit check "$bbid"`, and `babysit signal KILL "$bbid"` if it is still
 running a few seconds later.
+
+## Which operation to use
+
+Each of these answers a different question, and they do not cost the
+same. Pick the cheapest one that answers the question you actually have.
+
+**`start` with limits: when you are about to wait anyway.** Give
+`--expect`, `--idle` and `--timeout` to `start` itself. One call starts
+the command, waits for the first thing worth acting on, and returns the
+identifier and a status. Do not `start --detach` and then immediately
+`watch` with the same limits: that is the same wait in two calls.
+
+**`start --detach`: when you are not going to wait.** Use it to start
+several things at once, or to start something and get on with other work.
+It returns as soon as the command has been executed, so its 0 says
+"started", not "working"; follow up with `check` or `cat` before you
+rely on it.
+
+**`check` (or `status`): "is it still running?"** One word and an exit
+status, immediately. This is the right call inside a condition
+(`babysit check "$bbid" >/dev/null && ...`), and the right first question
+about something you started a while ago.
+
+**`info`: "what is its state, and how did it end?"** Also immediate. It
+prints the log path, the state, the pid while it is running, and the exit
+status once there is one. `info --exit-code` prints just the number and
+fails until the command has exited, which makes it the direct way to
+collect a result later: start, do other things, `info --exit-code`.
+
+**`cat`: "what did it print?"** Immediate, and it works on a running
+command as well as a finished one. Never read all of it by default: pipe
+it through `tail -n`, `head` or `grep` for what you are looking for. When
+something failed, `babysit cat stderr "$bbid" | tail -n 30` is usually
+the fastest route to the reason. For a very large log, `tail -n 40
+"$(babysit info --log "$bbid")"` reads only the end of the file, where
+`cat` reads all of it to strip the labels (lines there start with `OUT: `
+or `ERR: `).
+
+**`watch`: "tell me when something changes."** The only one of these that
+waits. It is not always necessary, and it is the most expensive: it keeps
+a tool call open and looks at the log several times a second. Use it when
+the command is already running, you need to block until it finishes,
+prints a particular line or goes quiet, and you have nothing else to do
+meanwhile. Always give it a `--timeout`, and send its stdout to
+`/dev/null` unless you want every new line in your context. If you find
+yourself calling `watch` in a loop, a single `start` with the right
+limits, or `info` when you next need the answer, would have done.
+
+**`signal`: "stop it", or anything else a signal can say.** Send `TERM`
+first and give the command a moment; `check`; send `KILL` only if it is
+still running. Use `INT` for programs that clean up on Ctrl-C. It exits 1
+if the command has already gone, which is not an error for you: it is
+the state you wanted.
+
+**`start --follow`: not for you.** It is for a person at a terminal.
+
+A typical exchange, then, has no `watch` in it at all:
+
+```sh
+bbid=$(babysit start --expect 'Listening on' --timeout 60s -- ./server)
+# ... use the server ...
+babysit check "$bbid" >/dev/null || babysit cat stderr "$bbid" | tail -n 20
+# ... finished with it ...
+babysit signal TERM "$bbid"
+```
 
 ## Things that will otherwise trip you up
 
@@ -189,6 +264,80 @@ is meant for a person at a terminal. For you it only costs context.
 **Tell the user the identifier.** When you leave something running, give
 the user the identifier and the command to look at it
 (`babysit cat <id>`), so they can pick it up without you.
+
+## Writing scripts that can be watched
+
+`babysit` can only judge a command by what it prints. When you write or
+edit a script that may run for more than a minute, shape its logging with
+that in mind. It costs a few lines, and it is the difference between
+finding out in the first minute that a run is doomed and finding out two
+hours later.
+
+**Say a lot before the long part starts.** Print each step of the setup as
+it happens: which inputs were found, which configuration is in effect,
+what is about to be run and with what arguments, and one unmistakable line
+at the moment the long operation begins.
+
+```sh
+echo "config: $config ($(wc -l <"$config") lines)"
+echo "input: $(ls "$input_dir" | wc -l) files in $input_dir"
+echo "output: $out_dir (free: $(df -h --output=avail "$out_dir" | tail -n 1))"
+echo "starting conversion of $total files"     # the line to --expect
+```
+
+Most failures of a long job happen here: a wrong path, a missing
+credential, an empty input, a full disk. With this logging they are in
+the first lines of the output, and `--expect 'starting conversion'` with a
+short `--timeout` turns "the setup failed" into something you learn at
+once, not when you come back to look.
+
+**While the long part runs, print only when something has moved.** Log a
+line when a unit of work completes ("converted 300 of 1200"), and nothing
+in between. Do not add a timer that prints "still working..." every few
+seconds, and do not leave a spinner or progress bar on. Output that
+appears whether or not anything is happening tells `babysit`, and you,
+nothing, and it defeats `--idle` completely: a script that is stuck but
+still printing its heartbeat never looks idle. If every line means
+progress, silence means something, and `--idle` becomes a real test.
+
+**Make the last line say how it ended.** A final "done: 1200 converted, 0
+failed" or "failed: ..." gives `--expect` something to wait for and the
+reader something to check.
+
+**Do not set the limits too tight.** The two failures are not equal: a
+limit that is too long costs you some waiting, while one that is too short
+reports a healthy run as stuck or late, and then you (or the user) stop a
+job that was fine, or stop trusting the report. Set `--idle` comfortably
+longer than the longest gap between two progress lines that a healthy run
+can have, not the typical gap, and remember that output may arrive in
+bursts (see "Silence is not a hang"). Set `--timeout` from how long the
+whole thing is expected to take with room to spare, not from how long you
+would like to wait. When you give both, `--idle` should typically be the
+shorter of the two: it asks "has it gone quiet?", which you want answered
+long before `--timeout` asks "has the whole thing taken too long?". An
+`--idle` as long as the `--timeout`, or longer, can never fire first and
+adds nothing. With nothing better to go on, `--idle 30s` is a sane default:
+long enough that a command which logs as described above will not trip it,
+short enough that a stuck one is noticed while you are still paying
+attention. Raise it for a command you know to be quiet for longer, or whose
+output arrives in bursts. If you do not know how long the whole thing
+should take, say so, start with a generous `--timeout`, and tighten it
+once you have seen one run. Remember
+that 124 and 125 never stop the command: if a limit turns out to have been
+too short, `babysit watch` it again for longer.
+
+Scripts written this way pay off twice. A failure is caught early, at the
+point where it costs a minute and not an afternoon. And the command you
+end up running is short and says what it means:
+
+```sh
+bbid=$(babysit start --expect 'starting conversion' --timeout 2m -- ./convert.sh)
+babysit watch "$bbid" --idle 10m --expect '^done: ' >/dev/null
+```
+
+A person reviewing your work can read those two lines and see what you
+waited for and how long you were prepared to wait, which they cannot do
+with a `sleep` loop wrapped around `pgrep` and `tail`.
 
 ## When not to use it
 
