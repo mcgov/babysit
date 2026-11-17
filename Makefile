@@ -120,7 +120,8 @@ check-freebsd-vm:
 
 lint:
 	shellcheck -x --severity=warning tests/run.sh tests/lib.sh \
-	    tests/freebsd-vm.sh tests/testcases/*-test.sh precommit.sh
+	    tests/freebsd-vm.sh tests/ci-local.sh tests/testcases/*-test.sh \
+	    precommit.sh
 	@for m in $(MANPAGES); do \
 	    out=$$(groff -man -Tutf8 -ww -z $$m 2>&1); \
 	    if [ -n "$$out" ]; then echo "$$m: $$out"; exit 1; fi; \

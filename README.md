@@ -143,6 +143,18 @@ The test cases are in `tests/testcases/`, one file each, numbered in the
 order they run. Every file starts with a comment giving its goal, its
 procedure and what makes it fail, and can be run on its own.
 
+The CI jobs can be run on your own machine, each in a fresh container:
+
+```sh
+tests/ci-local.sh --list              # the jobs, and which can run here
+tests/ci-local.sh --job test-debian   # one job
+tests/ci-local.sh                     # every job that needs no special runner
+```
+
+It reads the jobs from `.gitlab-ci.yml`, so it runs what GitLab would run,
+against your working tree including uncommitted changes. It needs podman or
+docker, and python3 with the yaml module. See `tests/ci-local.sh --help`.
+
 `check-freebsd-vm` downloads the official FreeBSD cloud image once (about
 670 MB, kept in `~/.cache/babysit/freebsd-vm`), boots a fresh copy of it,
 and runs the suite, the sanitizers and the package build inside it. See
