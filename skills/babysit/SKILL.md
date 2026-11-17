@@ -142,10 +142,32 @@ babysit cat "$bbid" | tail -n 40   # what it has printed since
 
 That is usually all you need, and it is cheaper than `babysit watch`:
 `info` and `cat` answer at once and return, where `watch` holds a tool
-call open and keeps looking at the log until something happens. Reach for
-`watch` only when there is nothing useful to do in the meantime and you
-want to be told the moment the command finishes or goes quiet (see "Which
-operation to use" below).
+call open and keeps looking at the log until something happens. When there
+is nothing useful to do in the meantime, `babysit wait` is the way to
+block until the command is done (next pattern); keep `watch` for when you
+need to be told that it has gone quiet or printed a particular line (see
+"Which operation to use" below).
+
+### Start something that announces itself, then wait for it in silence
+
+Many jobs print a few lines while they set up and then nothing until they
+finish. Confirm the start with `--expect`, then `wait`:
+
+```sh
+bbid=$(babysit start --expect 'starting conversion' --timeout 2m -- ./convert.sh) || {
+    babysit cat "$bbid" | tail -n 30     # it never got going: see why
+    exit 1
+}
+babysit wait "$bbid" --timeout 30m
+rc=$?                                    # its exit status, or 124: still running
+babysit cat "$bbid" | tail -n 20
+```
+
+`wait` prints nothing and reads none of the output; it simply returns the
+command's exit status when the command has exited, or 124 if the
+`--timeout` passes first, in which case the command is still running and
+you can `wait` again. Because the job is expected to be silent, `--idle`
+would be the wrong test here, and `wait` does not take it.
 
 ### Look in on something you started earlier
 
@@ -207,15 +229,24 @@ the fastest route to the reason. For a very large log, `tail -n 40
 `cat` reads all of it to strip the labels (lines there start with `OUT: `
 or `ERR: `).
 
-**`watch`: "tell me when something changes."** The only one of these that
-waits. It is not always necessary, and it is the most expensive: it keeps
-a tool call open and looks at the log several times a second. Use it when
-the command is already running, you need to block until it finishes,
-prints a particular line or goes quiet, and you have nothing else to do
-meanwhile. Always give it a `--timeout`, and send its stdout to
-`/dev/null` unless you want every new line in your context. If you find
-yourself calling `watch` in a loop, a single `start` with the right
-limits, or `info` when you next need the answer, would have done.
+**`wait`: "tell me when it has finished."** It blocks until the command
+has exited and returns its exit status, printing nothing and reading
+nothing; it costs next to nothing while it waits. Give it a `--timeout`
+below your own tool call's limit; 124 means the command is still running.
+This is the one to use for a command that is silent while it works, and
+for collecting the result of something you started earlier.
+
+**`watch`: "tell me when something changes."** Like `wait`, it blocks,
+but it follows the log while it does, so that it can also return when the
+command prints a particular line (`--expect`) or goes quiet (`--idle`).
+It is not always necessary, and it is the most expensive of these: it
+keeps a tool call open and looks at the log several times a second. Use
+it only when one of those two conditions is what you are waiting for.
+Always give it a `--timeout`, and send its stdout to `/dev/null` unless
+you want every new line in your context. If all you want is the end of
+the command, use `wait`; if you find yourself calling `watch` in a loop,
+a single `start` with the right limits, or `info` when you next need the
+answer, would have done.
 
 **`signal`: "stop it", or anything else a signal can say.** Send `TERM`
 first and give the command a moment; `check`; send `KILL` only if it is
@@ -234,6 +265,92 @@ babysit check "$bbid" >/dev/null || babysit cat stderr "$bbid" | tail -n 20
 # ... finished with it ...
 babysit signal TERM "$bbid"
 ```
+
+## Mistakes to avoid
+
+### Do not run a silent wait loop under it
+
+The loop you might write to wait for something is exactly the kind of
+command `babysit` cannot help with:
+
+```sh
+# Don't: a loop that prints nothing until it is over
+babysit start --idle 30s -- sh -c 'until grep -q "Listening on" server.log; do sleep 1; done'
+```
+
+`babysit` judges a command by its output, and this one has none. `--idle`
+reports it as stalled after thirty seconds although it is doing just what
+it was written to do; there is no line for `--expect` to match; and when
+it does return, all you know is that the loop ended. The same goes for
+`while ! curl -s ...; do sleep 1; done`, `sleep 600`, `wait`, and any
+other command whose only job is to wait quietly.
+
+Waiting for a line is what `--expect` is for. Put it on the command that
+prints the line, not on a loop that looks for it:
+
+```sh
+# Do: let babysit watch the real command's output
+bbid=$(babysit start --expect 'Listening on' --timeout 60s -- ./server)
+```
+
+If the command is already running under `babysit`, wait on that instance:
+`babysit watch "$bbid" --expect 'Listening on' --timeout 60s`. If it was
+not started by `babysit` and only writes to a file, a plain shell loop
+with its own deadline is the honest tool; wrapping it in `babysit` adds
+nothing.
+
+### The command is run directly, not by a shell
+
+`babysit start -- command args...` executes `command` itself. Nothing
+between `--` and the end of the line is interpreted by a shell, so shell
+syntax there does not do what it looks like:
+
+- **`until`, `while`, `for`, `if`, `cd` and other shell words are not
+  programs.** `babysit start -- until ...` fails with status 127,
+  "cannot execute 'until'".
+- **`VAR=value command` is not an assignment.** It fails with 127 as well.
+  Use `env VAR=value command`.
+- **`|`, `&&`, `;`, `>` and `2>&1` belong to your shell, not to the
+  command.** In `babysit start -- make | tee out`, it is `babysit`'s own
+  output, the identifier, that goes into the pipe, and `make` knows
+  nothing of it.
+- **`$VAR`, `*.txt` and `~` are expanded by your shell before `babysit`
+  runs**, in your directory and with your variables.
+
+When you need any of that, say so explicitly and quote it once:
+
+```sh
+bbid=$(babysit start --timeout 10m -- sh -c 'cd build && make 2>&1 | tee make.out')
+```
+
+Then remember what you have asked for: the status reported is the
+shell's, which for a pipeline is that of its last command (`tee`, above)
+unless you add `set -o pipefail` in a shell that has it.
+
+### Other things that look reasonable and are not
+
+- **Do not wrap `babysit` in `timeout`, `nohup`, `setsid` or `&`.** It
+  already detaches the command and has its own limits. `timeout 60
+  babysit start -- cmd` stops only the `babysit` that was waiting; the
+  command carries on, and you have lost the identifier.
+- **Do not combine `--detach` with `--expect`, `--idle` or `--timeout`.**
+  `--detach` returns at once, so the others are never consulted. Leave
+  `--detach` off when you want to wait.
+- **`--expect` is a regular expression.** `.`, `[`, `(`, `*`, `+` and `?`
+  mean something in it. Use `--fixed` for text such as `[::]:8080` or
+  `(ready)`.
+- **`--expect` sees one line at a time.** It cannot match text that the
+  command prints across two lines, and it is not offered the command line
+  or `babysit`'s own notes, only what the command wrote.
+- **`babysit watch --expect` reads the log from the beginning.** A line
+  printed before you called it still matches, which is what you want for
+  "has it ever said ready", and not for "has it said it again".
+- **A command that puts itself in the background is reported as exited.**
+  Many daemons do that by default; `babysit` then follows the launcher,
+  which exits at once with 0. Run such programs in the foreground
+  (`--foreground`, `-F`, `--no-daemon`, or whatever the program calls it).
+- **A limit that fires is not a failure of the command.** 124 and 125
+  describe your patience, not its health. Look before you kill.
 
 ## Things that will otherwise trip you up
 
@@ -312,11 +429,13 @@ longer than the longest gap between two progress lines that a healthy run
 can have, not the typical gap, and remember that output may arrive in
 bursts (see "Silence is not a hang"). Set `--timeout` from how long the
 whole thing is expected to take with room to spare, not from how long you
-would like to wait. When you give both, `--idle` should typically be the
-shorter of the two: it asks "has it gone quiet?", which you want answered
-long before `--timeout` asks "has the whole thing taken too long?". An
-`--idle` as long as the `--timeout`, or longer, can never fire first and
-adds nothing. With nothing better to go on, `--idle 30s` is a sane default:
+would like to wait. When you give both, `--timeout` must always be the
+longer of the two, and `--idle` the shorter: `--idle` asks "has it gone
+quiet?", which you want answered long before `--timeout` asks "has the
+whole thing taken too long?". An `--idle` as long as the `--timeout`, or
+longer, can never fire, because the `--timeout` always gets there first;
+if you catch yourself writing `--idle 5m --timeout 2m`, one of the two
+numbers is wrong. With nothing better to go on, `--idle 30s` is a sane default:
 long enough that a command which logs as described above will not trip it,
 short enough that a stuck one is noticed while you are still paying
 attention. Raise it for a command you know to be quiet for longer, or whose
@@ -337,7 +456,9 @@ babysit watch "$bbid" --idle 10m --expect '^done: ' >/dev/null
 
 A person reviewing your work can read those two lines and see what you
 waited for and how long you were prepared to wait, which they cannot do
-with a `sleep` loop wrapped around `pgrep` and `tail`.
+with a `sleep` loop wrapped around `pgrep` and `tail`. For a script that
+prints nothing between its first line and its last, replace the second
+line with `babysit wait "$bbid" --timeout 2h`.
 
 ## When not to use it
 
