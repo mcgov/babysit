@@ -97,7 +97,6 @@ instead of this:
 ! Approve access to path '**/'?
 
 > ( •_•) shimmy shamming ....            updated! run /restart to update
-try fast mode! (requires usage credits)
 ```
 
 ---
