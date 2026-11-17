@@ -35,8 +35,8 @@ running() {
 }
 
 id=$("$bs" start --log-dir "$work/s" --expect ready -- \
-    sh -c 'trap "echo got usr1" USR1; (trap "" USR1; exec sleep 30) & echo "kid $!"; echo ready; while :; do wait && break; done' 2>"$work/s1")
-kid=$(sed -n 's/^OUT: kid //p' "$work/s1")
+    sh -c 'trap "echo got usr1" USR1; (trap "" USR1; exec sleep 30) & echo "kid $!"; echo ready; while :; do wait && break; done' 2>/dev/null)
+kid=$("$bs" cat --log-dir "$work/s" stdout "$id" | sed -n 's/^kid //p')
 sg USR1 "$id"
 check "signal by name: exit 0" $? 0
 sleep 0.5

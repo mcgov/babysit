@@ -15,7 +15,7 @@
  *   babysit_time.c      clocks and intervals
  *   babysit_start.c     "start": the parent
  *   babysit_sitter.c    the babysitter process
- *   babysit_output.c    its log, echo and line buffering
+ *   babysit_output.c    its log and line buffering
  *   babysit_control.c   its control FIFO and the exit_code file
  *   babysit_instance.c  instances on disk
  *   babysit_inspect.c   "check", "info", "signal", "cat"
@@ -33,7 +33,7 @@
 #define PREFIX_LEN 5
 #define LINE_MAX_ 4096
 #define PARTIAL_FLUSH_MS 1000 /* log an unterminated line after this long */
-#define ECHO_FD 2 /* the caller's stderr; its stdout is for the identifier */
+#define FOLLOW_TICK_MS 100    /* how often start --follow looks at the log */
 
 enum {
   MSG_START = 1, /* value: child pid */
@@ -44,7 +44,8 @@ enum {
   MSG_MATCH,
   MSG_STALL,
   MSG_TIMEOUT,
-  MSG_DETACHED
+  MSG_DETACHED,
+  MSG_WARN_LOG /* value: errno; the log could not be written. Not final. */
 };
 
 struct msg {
@@ -111,9 +112,9 @@ void set_nonblock(int fd);
 void set_cloexec(int fd);
 void send_msg(int type, int value);
 void release(int type, int value);
-void echo(const char *buf, size_t n);
 void log_write(const char *buf, size_t n);
 void emit(const char *buf, size_t n);
+void out_flush(void);
 void flush_partial(struct lstream *s);
 int read_stream(struct lstream *s);
 void drain(struct lstream *s);

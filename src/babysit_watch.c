@@ -15,8 +15,8 @@
  * return as "start" would have. Whoever started it has gone, and its
  * babysitter is no longer telling anyone anything, so this reads the log
  * file itself, from the beginning: a line that appeared before we got here
- * still counts for --expect. Lines that appear from now on are echoed on
- * stderr.
+ * still counts for --expect. Lines that appear from now on are printed on
+ * stdout.
  */
 #define WATCH_TICK_MS 100
 
@@ -78,7 +78,7 @@ int cmd_watch(int argc, char **argv) {
     fprintf(stderr, "babysit: cannot read %s: %s\n", in.log, strerror(errno));
     return EXIT_USAGE;
   }
-  from = sb.st_size; /* what is there already is not echoed */
+  from = sb.st_size; /* what is there already is not printed */
 
   start = last = now_ms();
   for (;;) {
@@ -93,7 +93,7 @@ int cmd_watch(int argc, char **argv) {
         int hit = 0;
 
         if (pos >= from) {
-          ssize_t w = write(2, line, n);
+          ssize_t w = write(1, line, n);
           (void)w;
         }
         if (expect_pat && n > PREFIX_LEN &&

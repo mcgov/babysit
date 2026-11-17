@@ -26,6 +26,7 @@ static void on_sigchld(int sig) {
 
 /* The babysitter's way out. */
 static void leave(int code) {
+  out_flush();
   ctl_close();
   COVERAGE_FLUSH();
   _exit(code);
@@ -46,13 +47,14 @@ void babysitter(const char *dir, char **cmd, const char *cmdline, int detach,
   signal(SIGXFSZ, SIG_IGN); /* a log at its size limit: EFBIG, not death */
   watching = 1;
 
-  /* Keep only the caller's stderr (for echoing); drop stdin and stdout,
-   * so that a caller reading the identifier from stdout sees end-of-file
-   * as soon as the parent has printed it and gone. */
+  /* Keep nothing of the caller's: whoever reads its stdout or stderr sees
+   * end-of-file as soon as the parent has gone, and nothing the caller
+   * does with them can reach us or the command. */
   devnull = open("/dev/null", O_RDWR);
   if (devnull >= 0) {
     dup2(devnull, 0);
     dup2(devnull, 1);
+    dup2(devnull, 2);
     if (devnull > 2)
       close(devnull);
   }
@@ -154,8 +156,8 @@ void babysitter(const char *dir, char **cmd, const char *cmdline, int detach,
     emit(line, (size_t)n);
   }
   ctl_open(dir);
-  /* Only now may the parent print the identifier: sharing a terminal or
-   * a file with our echo, it then lands after the header, not inside it. */
+  /* The log has its header by the time the parent prints the identifier. */
+  out_flush();
   send_msg(MSG_START, (int)child);
   if (detach)
     release(MSG_DETACHED, 0);
@@ -203,6 +205,7 @@ void babysitter(const char *dir, char **cmd, const char *cmdline, int detach,
         wait = rem;
     }
 
+    out_flush(); /* nothing stays in the buffer while we sleep */
     p[0].fd = out.fd;
     p[1].fd = err.fd;
     p[2].fd = reaped ? -1 : chld_pipe[0];
@@ -251,6 +254,7 @@ void babysitter(const char *dir, char **cmd, const char *cmdline, int detach,
         /* The status first, then the lock: someone who finds the lock gone
          * must find the status there. From here on the pid may belong to
          * something else. */
+        out_flush(); /* the log is complete before the status appears */
         record_exit(dir, code);
         lock_byte(log_fd, LOCK_CHILD, F_UNLCK);
         if (WIFSIGNALED(status))

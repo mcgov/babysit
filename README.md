@@ -8,7 +8,8 @@ quiet, or just let it run. Returning early never stops the command; it keeps
 running and its output keeps going to a log.
 
 `babysit start` prints one thing on stdout: an identifier for the run, such as
-`20261116/06/15/k3f9`. The command's output is echoed on stderr.
+`20261116/06/15/k3f9`. The command's output is not copied to the caller; it
+is read from the log, with `babysit cat`, `babysit watch` or `tail -f`.
 
 ```sh
 # return once the server is listening (or after 30s), leave it running
@@ -65,7 +66,7 @@ babysit check "$bbid" || echo "server is dead"
 |---|---|
 | `babysit start [options] -- command` | run a command, print its identifier |
 | `babysit watch CHILD_ID [options]` | attach to a running instance and return as `start` would |
-| `babysit check CHILD_ID` | exit 0 and print `running`, or exit 1 and print `exited N` |
+| `babysit check CHILD_ID` | exit 0 and print `running`, or exit 1 and print `exited N` (`status` is another name for it) |
 | `babysit info CHILD_ID [--pid\|--log\|--exit-code]` | where the log is, the state, the pid while it runs |
 | `babysit signal SIGNAL CHILD_ID` | have the babysitter signal the command |
 | `babysit cat [stdout] [stderr] CHILD_ID` | print the command's output so far, without the `OUT:`/`ERR:` labels |

@@ -26,6 +26,23 @@ static int read_msg(int fd, struct msg *m) {
   return 0;
 }
 
+/*
+ * --follow: copy to our stderr whatever has been added to the log since the
+ * last time. It is this process that copies, never the babysitter: a
+ * terminal that is slow to take the output delays our return and nothing
+ * else, neither the command nor the timers.
+ */
+static void follow_log(int fd) {
+  static char buf[1 << 16];
+  ssize_t r;
+
+  if (fd < 0)
+    return;
+  while ((r = read(fd, buf, sizeof buf)) > 0)
+    if (write_all(2, buf, (size_t)r) < 0)
+      break;
+}
+
 /* babysit start [options] [--] command [args...] */
 int cmd_start(int argc, char **argv) {
   const char *idle_s = NULL, *timeout_s = NULL, *dir = NULL, *v;
@@ -35,7 +52,9 @@ int cmd_start(int argc, char **argv) {
   char path[PATH_BUF + ID_MAX + 8];
   char *cmdline, **cmd;
   long long idle_ms = -1, timeout_ms = -1;
-  int detach = 0, utc = 0, i, st, status_pipe[2];
+  int detach = 0, follow = 0, follow_fd = -1, utc = 0, i, n, st;
+  int status_pipe[2];
+  struct pollfd waiting;
   struct msg m;
   pid_t pid, mid;
 
@@ -60,6 +79,8 @@ int cmd_start(int argc, char **argv) {
       expect_fixed = 1;
     } else if (opt_match("babysit", argc, argv, &i, "-d", "--detach", NULL)) {
       detach = 1;
+    } else if (opt_match("babysit", argc, argv, &i, "-f", "--follow", NULL)) {
+      follow = 1;
     } else {
       fprintf(stderr, "babysit: unknown option '%s'\n\n", argv[i]);
       usage(stderr);
@@ -123,6 +144,9 @@ int cmd_start(int argc, char **argv) {
     return EXIT_USAGE;
   }
   fflush(NULL);
+  /* A caller that has closed our stderr gets no messages; it still gets
+   * the exit status, which a SIGPIPE would take away. */
+  signal(SIGPIPE, SIG_IGN);
 
   /* Double fork + setsid: the babysitter is reparented to init and has no
    * controlling terminal, so it outlives us and our caller. */
@@ -178,8 +202,33 @@ int cmd_start(int argc, char **argv) {
   puts(child_id);
   fflush(stdout);
 
-  /* Now just wait to be told why to return. */
-  if (read_msg(status_pipe[0], &m) < 0) {
+  if (follow) {
+    snprintf(path, sizeof path, "%s/%s/log", logdir, child_id);
+    follow_fd = open(path, O_RDONLY);
+  }
+
+  /* Now just wait to be told why to return, showing the log as it grows
+   * if that was asked for. A warning about the log may come first; it is
+   * passed on, and the wait goes on. */
+  for (;;) {
+    follow_log(follow_fd);
+    if (follow_fd >= 0) {
+      waiting.fd = status_pipe[0];
+      waiting.events = POLLIN;
+      waiting.revents = 0;
+      if (poll(&waiting, 1, FOLLOW_TICK_MS) == 0)
+        continue;
+    }
+    n = read_msg(status_pipe[0], &m);
+    if (n < 0 || m.type != MSG_WARN_LOG)
+      break;
+    fprintf(stderr,
+            "babysit: %s: warning: cannot write to the log (%s); output is "
+            "missing from it from here on\n",
+            child_id, strerror(m.value));
+  }
+  follow_log(follow_fd); /* the babysitter wrote the log before it told us */
+  if (n < 0) {
     fprintf(stderr,
             "babysit: %s: lost contact with the babysitter; see the "
             "log\n",

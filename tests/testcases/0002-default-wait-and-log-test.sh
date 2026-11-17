@@ -18,7 +18,8 @@
 #   - the log is not at <log-dir>/<identifier>/log.
 #   - the log does not start with the command line and the "Process created"
 #     line, or lacks the OUT:/ERR: lines or the final exit line.
-#   - what babysit echoed on stderr differs from what it logged.
+#   - anything but babysit's own message is on stderr, or "babysit cat"
+#     does not give the output back.
 
 # shellcheck source=tests/lib.sh
 . "$(dirname "$0")/../lib.sh"
@@ -33,8 +34,9 @@ has "log has pid line" "$log" '^Process created with pid [0-9]'
 has "log has stdout" "$log" '^OUT: hi$'
 has "log has stderr" "$log" '^ERR: oops$'
 has "log has exit code" "$log" '^Process exited with code 3$'
-has "output is echoed on stderr" "$work/e1" '^OUT: hi$'
+check "stderr carries only babysit's own message" "$(grep -vc '^babysit: ' "$work/e1")" 0
 has "exit is reported on stderr" "$work/e1" 'exited with code 3'
-check "echo equals the log" "$(grep -v '^babysit: ' "$work/e1")" "$(cat "$log")"
+check "cat gives the output back" "$("$bs" cat --log-dir "$work/a" "$(cat "$work/o1")")" "hi
+oops"
 
 finish

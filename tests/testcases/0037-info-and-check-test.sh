@@ -33,9 +33,10 @@ i() { "$bs" info --log-dir "$work/g" "$@"; }
 c() { "$bs" check --log-dir "$work/g" "$@"; }
 
 id=$("$bs" start --log-dir "$work/g" --expect . -- sh -c 'echo $$; exec sleep 30' 2>"$work/e1")
-cpid=$(sed -n 's/^OUT: //p' "$work/e1")
+cpid=$("$bs" cat --log-dir "$work/g" stdout "$id")
 check "check: running, exit 0" "$(c "$id"; echo $?)" "running
 0"
+check "status is another name for check" "$("$bs" status --log-dir "$work/g" "$id")" running
 check "info --pid prints the pid of the running command" "$(i --pid "$id")" "$cpid"
 check "info --log prints the log path" "$(i --log "$id")" "$work/g/$id/log"
 check "options may follow the identifier" "$(i "$id" --log)" "$work/g/$id/log"

@@ -24,7 +24,7 @@
 #   - the statuses are not 0, 0, 124, 125 and 125.
 #   - the command is not running after the first four, or is running after
 #     the one with --onfail.
-#   - lines that appear while watching are not echoed on stderr.
+#   - lines that appear while watching are not printed on stdout.
 #   - watching a finished instance does not return its exit status, or 1
 #     when it exited 0 without the expected line.
 
@@ -40,10 +40,10 @@ wt "$id" --expect early 2>/dev/null
 check "a line already in the log satisfies --expect, at once" "$? $(quick "$t" 2)" "0 y"
 wt "$id" --timeout 0.5 2>"$work/w1"
 check "--timeout: 124" $? 124
-wt "$id" --expect '^late$' --timeout 10 2>"$work/w2"
+wt "$id" --expect '^late$' --timeout 10 >"$work/w2" 2>/dev/null
 check "a line that arrives while watching: 0" $? 0
-has "and it is echoed on stderr" "$work/w2" '^OUT: late$'
-check "what was already there is not echoed" "$(grep -c '^OUT: early$' "$work/w2")" 0
+has "and it is printed on stdout" "$work/w2" '^OUT: late$'
+check "what was already there is not printed" "$(grep -c '^OUT: early$' "$work/w2")" 0
 wt --idle 1 "$id" 2>"$work/w3"
 check "--idle: 125" $? 125
 check "the command is still running after all that" "$("$bs" check --log-dir "$work/w" "$id")" running

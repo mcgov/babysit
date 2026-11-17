@@ -36,7 +36,7 @@ has "--idle says stalled" "$work/o3" 'stalled'
 "$bs" start --log-dir "$work/c" --idle 2 -- sh -c 'for i in 1 2 3 4; do echo $i; sleep 1; done' >/dev/null 2>&1
 check "--idle lets a progressing command finish" $? 0
 "$bs" start --log-dir "$work/c" --idle 0.5 -- sh -c 'printf "Continue? "; sleep 3' >"$work/o3c" 2>&1
-has "stall shows an unterminated prompt" "$work/o3c" '^OUT: Continue? $'
+has "stall logs an unterminated prompt" "$(logof "$work/o3c")" '^OUT: Continue? $'
 sleep 3
 has "stalled command finished in background" "$(logof "$work/o3")" '^OUT: b$'
 

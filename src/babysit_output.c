@@ -6,16 +6,21 @@
  * license; see the file LICENSE for details.
  */
 /*
- * babysit: the babysitter's output: the log, the echo on the caller's stderr,
- * the messages to the waiting parent, and the line buffering of the command's
- * two streams.
+ * babysit: the babysitter's output: the log, the messages to the waiting
+ * parent, and the line buffering of the command's two streams.
+ *
+ * Nothing is copied to the caller. The babysitter holds none of the
+ * caller's descriptors, so a caller that reads slowly, or not at all, can
+ * neither hold the command back nor keep a timer from firing. Whoever
+ * wants to see the output reads the log: "babysit cat", "babysit watch",
+ * or tail -f.
  */
 #include "babysit_internal.h"
 
 /* babysitter state */
 int log_fd = -1, status_fd = -1;
 
-int watching; /* still echoing to the caller and running timers */
+int watching; /* the parent is still waiting, and the timers are running */
 long long last_read;
 
 long long timeout_at = -1; /* when --timeout expires, in now_ms() */
@@ -60,106 +65,17 @@ void send_msg(int type, int value) {
 }
 
 /*
- * Stop watching: close our copy of the caller's stderr, then tell the
- * parent why so it can return. Logging carries on regardless.
- */
-void release(int type, int value) {
-  int devnull;
-
-  if (!watching)
-    return;
-  watching = 0;
-  devnull = open("/dev/null", O_WRONLY);
-  if (devnull >= 0) {
-    dup2(devnull, ECHO_FD);
-    close(devnull);
-  } else {
-    close(ECHO_FD);
-  }
-  send_msg(type, value);
-  if (status_fd >= 0) {
-    close(status_fd);
-    status_fd = -1;
-  }
-}
-
-/*
- * Copy output to the caller's stderr. The caller may read slowly or not at
- * all, and a plain write() would then block for as long as it likes, with
- * --timeout unable to fire and a killed parent going unnoticed. So wait for
- * room with poll(), keeping an eye on both, and write no more at a time
- * than a pipe that reports room is sure to take. The descriptor is shared
- * with the caller, so it cannot simply be made non-blocking.
- *
- * Time spent waiting here is the caller's silence, not the command's, and
- * does not count towards --idle.
- */
-void echo(const char *buf, size_t n) {
-  struct pollfd p[2];
-  int waited = 0;
-
-  while (watching && n > 0) {
-    long long rem = -1;
-    ssize_t w;
-    int r;
-
-    if (timeout_at >= 0) {
-      rem = timeout_at - now_ms();
-      if (rem <= 0) {
-        release(MSG_TIMEOUT, 0);
-        break;
-      }
-    }
-    p[0].fd = ECHO_FD;
-    p[0].events = POLLOUT;
-    p[1].fd = status_fd; /* errors out if the parent dies */
-    p[1].events = 0;
-    p[0].revents = p[1].revents = 0;
-    r = poll(p, 2, 0);
-    if (r == 0) {
-      if (rem > INT_MAX)
-        rem = INT_MAX;
-      waited = 1;
-      r = poll(p, 2, (int)rem); /* -1 without --timeout: no limit */
-    }
-    if (r < 0 && errno != EINTR) {
-      release(MSG_DETACHED, 0);
-      break;
-    }
-    if (r <= 0)
-      continue; /* the deadline is looked at again above */
-    if (p[1].revents) {
-      release(MSG_DETACHED, 0); /* parent was killed: let go too */
-      break;
-    }
-    if (!p[0].revents)
-      continue;
-    w = write(ECHO_FD, buf, n > PIPE_BUF ? PIPE_BUF : n);
-    if (w < 0) {
-      if (errno == EINTR || errno == EAGAIN)
-        continue;
-      release(MSG_DETACHED, 0); /* caller stopped reading */
-      break;
-    }
-    buf += w;
-    n -= (size_t)w;
-  }
-  if (waited)
-    last_read = now_ms();
-}
-
-/*
  * Write to the log. The disk can fill up, or a file size limit be reached,
  * while the command is running; that is no reason to stop it, but it must
- * not pass unnoticed either. The caller is told once, on its stderr, and
- * what the log missed is counted. Each later write tries again, and as soon
- * as one gets through the log first gets a line saying how much is missing
- * at that point.
+ * not pass unnoticed either. The parent is told once, if it is still
+ * waiting, and what the log missed is counted. Each later write tries
+ * again, and as soon as one gets through the log first gets a line saying
+ * how much is missing at that point.
  */
 static unsigned long long lost; /* bytes the log did not take */
 static int lost_err, lost_told;
 
-void log_write(const char *buf, size_t n) {
+static void log_now(const char *buf, size_t n) {
   char note[256];
   int k;
 
@@ -177,17 +93,64 @@ void log_write(const char *buf, size_t n) {
   lost += n;
   if (!lost_told) {
     lost_told = 1;
-    k = snprintf(note, sizeof note,
-                 "babysit: warning: cannot write to the log (%s); output is "
-                 "missing from it from here on\n",
-                 strerror(lost_err));
-    echo(note, (size_t)k);
+    send_msg(MSG_WARN_LOG, lost_err);
   }
 }
 
+/*
+ * Output is collected here and written out in one go: the log gets one
+ * write() for everything that one read of the command's pipe produced,
+ * where a write per line would cost a system call a line and hold a busy
+ * command back many times over. Only whole lines are put in, so whoever
+ * reads the log never sees half of one.
+ *
+ * Nothing waits in here: the main loop empties it before it sleeps, and so
+ * does everything that tells the parent something or ends the process.
+ */
+static char pending[1 << 17];
+static size_t npending;
+
+void out_flush(void) {
+  size_t n = npending;
+
+  npending = 0;
+  if (n > 0)
+    log_now(pending, n);
+}
+
+/* To the log, by way of the buffer. */
 void emit(const char *buf, size_t n) {
-  log_write(buf, n);
-  echo(buf, n);
+  if (n > sizeof pending - npending)
+    out_flush();
+  if (n > sizeof pending) { /* a command line of rare length */
+    log_now(buf, n);
+    return;
+  }
+  memcpy(pending + npending, buf, n);
+  npending += n;
+}
+
+/* To the log at once, after whatever is waiting. */
+void log_write(const char *buf, size_t n) {
+  out_flush();
+  log_now(buf, n);
+}
+
+/*
+ * Stop watching: tell the parent why, so that it can return. The log is
+ * brought up to date first: what the parent is told about is in it by the
+ * time the parent has gone. Logging carries on regardless.
+ */
+void release(int type, int value) {
+  if (!watching)
+    return;
+  out_flush();
+  watching = 0;
+  send_msg(type, value);
+  if (status_fd >= 0) {
+    close(status_fd);
+    status_fd = -1;
+  }
 }
 
 static void flush_line(struct lstream *s) {
@@ -213,19 +176,31 @@ void flush_partial(struct lstream *s) {
 
 /* Returns 1 if data was read, 0 on EOF (stream closed), -1 if nothing yet. */
 int read_stream(struct lstream *s) {
-  char tmp[4096];
-  ssize_t r = read(s->fd, tmp, sizeof tmp), i;
+  static char tmp[1 << 16]; /* as much as a pipe holds */
+  ssize_t r = read(s->fd, tmp, sizeof tmp);
+  const char *p = tmp, *end = tmp + (r > 0 ? r : 0);
 
   if (r > 0) {
     last_read = now_ms(); /* any byte counts as progress */
-    for (i = 0; i < r; i++) {
-      if (tmp[i] == '\n') {
-        flush_line(s);
-        continue;
+    while (p < end) {
+      /* Up to the next newline, in pieces no longer than a line may be. */
+      const char *nl = memchr(p, '\n', (size_t)(end - p));
+      size_t seg = (size_t)((nl ? nl : end) - p);
+
+      while (seg > 0) {
+        size_t room = LINE_MAX_ - s->len, take = seg < room ? seg : room;
+
+        memcpy(s->buf + PREFIX_LEN + s->len, p, take);
+        s->len += take;
+        p += take;
+        seg -= take;
+        if (s->len == LINE_MAX_)
+          flush_line(s);
       }
-      s->buf[PREFIX_LEN + s->len++] = tmp[i];
-      if (s->len == LINE_MAX_)
+      if (nl) {
         flush_line(s);
+        p = nl + 1;
+      }
     }
     return 1;
   }

@@ -30,9 +30,16 @@ babysit \- run a command detached, log it, and return early if it stalls
 .B babysit start
 runs
 .I command
-in the background under a babysitter process, writes its output to a log
-file and echoes it on stderr.
-On stdout it prints one line and nothing else: the
+in the background under a babysitter process and writes its output to a
+log file.
+None of that output is copied to the caller: it is read from the log, with
+.BR "babysit cat" ,
+.B "babysit watch"
+or
+.BR "tail \-f" .
+On stdout
+.B start
+prints one line and nothing else: the
 .I identifier
 of this run (the
 .I child_id
@@ -63,10 +70,10 @@ return and turns that into an exit status.
 .TP
 .B babysitter
 A detached process in its own session.
-It reads the command's stdout and stderr, writes the log, echoes the log to
-the caller's stderr, and runs the timers.
-When the parent should return, it closes its copy of the caller's stderr and
-carries on logging.
+It reads the command's stdout and stderr, writes the log, and runs the
+timers.
+It holds nothing of the caller's, neither terminal nor pipes.
+When the parent should return, it tells it why and carries on logging.
 .TP
 .B child
 The command.
@@ -98,7 +105,7 @@ returned, so
 reads the log itself, from the beginning: a line printed before it attached
 still satisfies
 .BR \-\-expect .
-Lines that appear while it watches are echoed on stderr.
+Lines that appear while it watches are printed on stdout.
 .B \-\-idle
 counts from the moment it attached.
 Like
@@ -107,7 +114,7 @@ it leaves the command running when it returns, unless
 .B \-\-onfail
 says otherwise.
 .TP
-.B check
+.BR check ", " status
 Print
 .B running
 and exit 0 if the instance's command is running.
@@ -199,6 +206,20 @@ Options of
 .TP
 .B \-d, \-\-detach
 Return 0 as soon as the command has started.
+.TP
+.B \-f, \-\-follow
+Show the log on stderr as it grows, for as long as
+.B start
+is waiting.
+This is for watching at a terminal, where it saves a second command.
+Scripts and agents should leave it off and read what they need afterwards
+with
+.BR "babysit cat" :
+with
+.B \-\-follow
+a caller that is slow to read stderr delays the return of
+.BR start ,
+its own time limit included, although never the command.
 .TP
 .BI "\-c, \-\-config " FILE
 Configuration file; see
@@ -347,10 +368,12 @@ or
 once the command is gone.
 .PP
 If the log cannot be written while the command is running, because the disk
-has filled up or a file size limit was reached, the command is left running
-and its output is still echoed.
-.B babysit
-prints one warning on stderr, and if writing works again later the log
+has filled up or a file size limit was reached, the command is left
+running.
+A
+.B "babysit start"
+that is still waiting prints one warning on stderr, and if writing works
+again later the log
 gets a line saying how many bytes are missing at that point.
 A log that ends without a
 .B "Process exited"
@@ -516,25 +539,18 @@ The identifier is printed on stdout once the command has started, and
 stdout is then finished with: a caller capturing it is not kept waiting.
 Nothing is printed there if nothing was started.
 .PP
-The command's output is echoed to the caller's stderr for as long as
-.B babysit
-has not returned.
-If the caller reads it slowly, or stops reading without closing it, the
-babysitter waits, and once the pipes in between are full the command waits
-too, as it would in any pipeline.
-.B \-\-timeout
-still expires on time while this is going on, and
-.B babysit
-then returns and the command carries on, logging only.
-Time spent waiting for the caller is not the command's silence and does not
-count towards
-.BR \-\-idle .
+The babysitter and the command hold nothing of the caller's: not its
+terminal, and not the pipes its stdout and stderr may be.
+A caller that reads
+.BR start 's
+output until end-of-file is therefore not kept waiting by a command that is
+still running, and nothing the caller does with its end can slow the
+command down or keep a time limit from expiring.
 .PP
 Killing or interrupting
 .B babysit
 does not stop the command.
-The babysitter notices that its parent is gone, releases the caller's
-stderr, and keeps logging.
+The babysitter notices that its parent is gone and keeps logging.
 .PP
 If the command exits while its own children still hold its stdout or stderr
 open, the exit is reported and logged at once, and their later output is
