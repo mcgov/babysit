@@ -22,8 +22,8 @@
 make                 # build bin/babysit and bin/babysitd
 make test            # end-to-end test suite
 make install-user    # for yourself, under ~/.local; no sudo
-                     # optional: install the 'babysit' skill for your AI agent
-make install-skill SKILL_DIR=/$agent_dir/skills
+                     # optional: the 'babysit' skill for your coding agent
+make install-claude-skill    # or: make install-copilot-skill
 
 ```
 
@@ -213,15 +213,16 @@ shell. To try it without installing: `source completions/babysit.bash`.
 
 ## For coding agents
 
-`skills/babysit/` is a skill that teaches a coding agent (Claude Code, for
-one) when and how to use `babysit`: start servers and long commands under
-it, keep the `child_id`, read output with `babysit cat`, stop things with
-`babysit signal`.
+`skills/babysit/` is a skill that teaches a coding agent (Claude Code or
+GitHub Copilot CLI, for example) when and how to use `babysit`: start
+servers and long commands under it, keep the `child_id`, read output with
+`babysit cat`, stop things with `babysit signal`.
 
 ```sh
-make install-skill                 # into ~/.claude/skills, for every project
-make install-skill SKILLDIR=/path/to/project/.claude/skills   # one project
-make install-skill SKILL_LINK=1    # link instead of copy, to work on the skill
+make install-claude-skill          # into ~/.claude/skills, for every project
+make install-copilot-skill         # into ~/.copilot/skills (GitHub Copilot CLI)
+make install-copilot-skill COPILOT_SKILLDIR=/path/to/project/.github/skills   # one project
+make install-claude-skill SKILL_LINK=1   # link instead of copy, to work on the skill
 ```
 
 Start a new agent session afterwards; skills are read when a session starts.

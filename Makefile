@@ -22,9 +22,11 @@ endif
 # Where bash looks for completions (the bash-completion package's
 # directory). An empty COMPDIR installs none.
 COMPDIR ?= $(PREFIX)/share/bash-completion/completions
-# Where "make install-skill" puts the agent skill: your personal Claude Code
-# skills by default. For one project, pass SKILLDIR=/path/to/project/.claude/skills.
-SKILLDIR ?= $(HOME)/.claude/skills
+# Where install-claude-skill and install-copilot-skill put the agent skill:
+# that agent's personal skills directory. For one project, pass e.g.
+# CLAUDE_SKILLDIR=/path/to/project/.claude/skills.
+CLAUDE_SKILLDIR  ?= $(HOME)/.claude/skills
+COPILOT_SKILLDIR ?= $(HOME)/.copilot/skills
 
 VERSION := $(shell sed -n 's/^\#define BABYSIT_VERSION "\(.*\)"/\1/p' src/babysit.h)
 ARCH    := $(shell uname -m)
@@ -233,15 +235,17 @@ uninstall:
 # SKILL_LINK=1 to link to it instead, which suits working on the skill, since
 # edits here then take effect in the next session. A new session is needed
 # either way: skills are read when a session starts.
-install-skill:
-	@mkdir -p "$(SKILLDIR)"
-	@rm -rf "$(SKILLDIR)/babysit"
+install-claude-skill:  SKILLDEST = $(CLAUDE_SKILLDIR)
+install-copilot-skill: SKILLDEST = $(COPILOT_SKILLDIR)
+install-claude-skill install-copilot-skill:
+	@mkdir -p "$(SKILLDEST)"
+	@rm -rf "$(SKILLDEST)/babysit"
 	@if [ -n "$(SKILL_LINK)" ]; then \
-	    ln -s "$(CURDIR)/skills/babysit" "$(SKILLDIR)/babysit"; \
-	    echo "linked $(SKILLDIR)/babysit -> $(CURDIR)/skills/babysit"; \
+	    ln -s "$(CURDIR)/skills/babysit" "$(SKILLDEST)/babysit"; \
+	    echo "linked $(SKILLDEST)/babysit -> $(CURDIR)/skills/babysit"; \
 	else \
-	    cp -R skills/babysit "$(SKILLDIR)/babysit"; \
-	    echo "installed $(SKILLDIR)/babysit"; \
+	    cp -R skills/babysit "$(SKILLDEST)/babysit"; \
+	    echo "installed $(SKILLDEST)/babysit"; \
 	fi
 	@command -v babysit >/dev/null || \
 	    echo "note: babysit is not on your PATH yet; the skill only helps once it is (make install PREFIX=\$$HOME/.local)"
@@ -309,4 +313,5 @@ clean:
 
 .PHONY: all test check perf check-asan check-ubsan check-tsan check-freebsd-vm \
         coverage fuzz lint \
-        install install-user uninstall uninstall-user install-skill dist bindist rpm deb arch-pkg freebsd-pkg clean
+        install install-user uninstall uninstall-user \
+        install-claude-skill install-copilot-skill dist bindist rpm deb arch-pkg freebsd-pkg clean
