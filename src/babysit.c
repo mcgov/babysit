@@ -31,8 +31,8 @@
  *
  * The babysitter records the command's exit status in <instance>/exit_code
  * and takes signals for it from <instance>/ctl. The other subcommands
- * (watch, check, info, signal) only ever look at an instance from outside,
- * through those files, the log and its locks.
+ * (watch, check, info, signal, follow-all) only ever look at an instance from
+ * outside, through those files, the log and its locks.
  *
  * POSIX.1-2008, C99, no extensions.
  */
@@ -48,12 +48,13 @@ void usage(FILE *f) {
       "       babysit info CHILD_ID [--pid | --log | --exit-code]\n"
       "       babysit signal SIGNAL CHILD_ID\n"
       "       babysit cat [stdout] [stderr] CHILD_ID\n"
+      "       babysit follow-all [--since SECS] [--idle SECS]\n"
       "\n"
       "start runs COMMAND detached from this terminal/pipe and logs its "
       "output to\n"
       "LOGDIR/CHILD_ID/log, where CHILD_ID identifies this run: the minute "
       "it\n"
-      "started and four random characters, for example 20261116/06/15/k3f9.\n"
+      "started and eight random characters, e.g. 20261116/06/15/k3f9w2mq.\n"
       "CHILD_ID is printed on stdout, alone. The command's output goes to "
       "the\n"
       "log and nowhere else, each line prefixed with 'OUT: ' (stdout) or "
@@ -67,7 +68,9 @@ void usage(FILE *f) {
       "The\n"
       "options below make it return early. When it does, the command is NOT\n"
       "stopped: it keeps running and its output keeps going to the log.\n"
-      "\n"
+      "\n");
+  fprintf(
+      f,
       "Options for start and watch:\n"
       "  -e, --expect REGEX   return 0 once an output line matches the POSIX\n"
       "                       extended REGEX (matched without the OUT:/ERR: "
@@ -118,6 +121,18 @@ void usage(FILE *f) {
       "if\n"
       "neither or both are named.\n"
       "\n"
+      "follow-all shows, as it is written, the output of every command under "
+      "the log\n"
+      "directory: those running now, and each one started from now on. "
+      "Every line\n"
+      "has the last part of its CHILD_ID in front. It runs "
+      "until\n"
+      "interrupted. --since SECS also shows, from the start, every log "
+      "written to\n"
+      "in the last SECS. A log silent for --idle SECS (default 10s; 0 for "
+      "never) is\n"
+      "closed, and opened again when there is more in it.\n"
+      "\n"
       "SECS may be fractional and may carry an s, m or h suffix (0.5, 30s, "
       "2m).\n"
       "The command gets /dev/null as stdin and its own process group.\n"
@@ -158,6 +173,8 @@ int main(int argc, char **argv) {
     return cmd_signal(argc - 1, argv + 1);
   if (strcmp(c, "cat") == 0)
     return cmd_cat(argc - 1, argv + 1);
+  if (strcmp(c, "follow-all") == 0)
+    return cmd_follow_all(argc - 1, argv + 1);
   if (*c)
     fprintf(stderr, "babysit: unknown command '%s'\n\n", c);
   else

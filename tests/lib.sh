@@ -99,7 +99,7 @@ has() { # description, file, pattern
     fi
 }
 
-idof() { grep -m 1 -E '^[0-9]{8}/[0-9]{2}/[0-9]{2}/[a-z0-9]{4}$' "$1"; }
+idof() { grep -m 1 -E '^[0-9]{8}/[0-9]{2}/[0-9]{2}/[a-z0-9]{8}$' "$1"; }
 logof() { find "$work" -path "*/$(idof "$1")/log" 2>/dev/null | head -n 1; }
 
 # touch -t stamp for N seconds ago (GNU date, then BSD date)

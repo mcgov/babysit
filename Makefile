@@ -41,7 +41,7 @@ BABYSIT_SRCS = src/babysit.c src/babysit_cmdline.c src/babysit_time.c \
                src/babysit_start.c src/babysit_sitter.c \
                src/babysit_output.c src/babysit_control.c \
                src/babysit_instance.c src/babysit_inspect.c \
-               src/babysit_watch.c
+               src/babysit_watch.c src/babysit_follow.c
 BABYSIT_HDRS = src/babysit.h src/babysit_internal.h
 
 PROGS    = $(BINDIR)/babysit $(BINDIR)/babysitd

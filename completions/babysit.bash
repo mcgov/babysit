@@ -39,7 +39,7 @@ _babysit_ids() {
     [ -d "$dir" ] || return
     (cd "$dir" 2>/dev/null &&
         find . -mindepth 4 -maxdepth 4 -type d \
-            -path './[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]/[0-9][0-9]/[0-9][0-9]/????' \
+            -path './[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]/[0-9][0-9]/[0-9][0-9]/????*' \
             2>/dev/null | sed 's|^\./||' | sort -r | head -n 200)
 }
 
@@ -52,7 +52,7 @@ _babysit() {
     COMPREPLY=()
 
     if [ "$COMP_CWORD" -eq 1 ]; then
-        mapfile -t COMPREPLY < <(compgen -W "start watch wait check status info signal cat --help --version" -- "$cur")
+        mapfile -t COMPREPLY < <(compgen -W "start watch wait check status info signal cat follow-all --help --version" -- "$cur")
         return
     fi
     sub="${COMP_WORDS[1]}"
@@ -73,8 +73,8 @@ _babysit() {
             mapfile -t COMPREPLY < <(compgen -W "$_babysit_signals" -- "$cur")
             return
             ;;
-        -e | --expect | -i | --idle | -t | --timeout)
-            case "$sub" in start | watch | wait) return ;; esac
+        -e | --expect | -i | --idle | -t | --timeout | -s | --since)
+            case "$sub" in start | watch | wait | follow-all) return ;; esac
             ;;
     esac
 
@@ -117,6 +117,9 @@ _babysit() {
             else
                 mapfile -t COMPREPLY < <(compgen -W "$(_babysit_ids)" -- "$cur")
             fi
+            ;;
+        follow-all)
+            mapfile -t COMPREPLY < <(compgen -W "--since --idle --log-dir" -- "$cur")
             ;;
         wait)
             if [[ "$cur" == -* ]]; then

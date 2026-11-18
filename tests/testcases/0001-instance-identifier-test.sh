@@ -26,7 +26,7 @@
 "$bs" start --log-dir "$work/i" -- sh -c 'echo hi' >"$work/o" 2>"$work/e"
 check "stdout is one line" "$(count <"$work/o")" 1
 check "and it is an identifier" \
-    "$(grep -cE '^[0-9]{8}/[0-9]{2}/[0-9]{2}/[a-km-np-z2-9]{4}$' "$work/o")" 1
+    "$(grep -cE '^[0-9]{8}/[0-9]{2}/[0-9]{2}/[a-km-np-z2-9]{8}$' "$work/o")" 1
 check "dated today" "$(cut -c 1-8 "$work/o")" "$today"
 check "the identifier is where the log is" \
     "$([ -f "$work/i/$(cat "$work/o")/log" ] && echo y)" y

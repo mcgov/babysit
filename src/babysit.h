@@ -16,7 +16,7 @@
  *   <log-dir>/archive/babysit_logs_<YYYYmmdd>.tar.gz           (babysitd)
  *
  * Every run of babysit is an instance with an identifier of its own,
- * "<YYYYmmdd>/<HH>/<MM>/<salt>": the minute it started in and four random
+ * "<YYYYmmdd>/<HH>/<MM>/<salt>": the minute it started in and eight random
  * characters. The identifier is the path of the instance's directory under
  * the log directory, so it can be read, and used, as it stands. It is made
  * unique by creating that directory with mkdir(), which fails if another
@@ -216,8 +216,9 @@ static inline int config_split(char *line, char **key, char **val) {
 
 /* ---------- instance identifiers ---------- */
 
-#define SALT_LEN 4
-#define ID_MAX 32 /* "YYYYmmdd/HH/MM/ssss" and room to spare */
+#define SALT_LEN 8     /* 32^8 salts: two of a million at once seldom agree */
+#define SALT_LEN_OLD 4 /* what it was; such instances are still ours */
+#define ID_MAX 32      /* "YYYYmmdd/HH/MM/ssssssss" and room to spare */
 
 /* The characters a salt is made of: no 0/o or 1/l to mistake for another. */
 static const char salt_chars[] = "abcdefghijkmnpqrstuvwxyz23456789";
@@ -238,12 +239,14 @@ static inline int is_hour_name(const char *s) {
 }
 
 static inline int is_salt_name(const char *s) {
-  int i;
+  size_t i, n = strlen(s);
 
-  for (i = 0; i < SALT_LEN; i++)
-    if (!s[i] || !strchr(salt_chars, s[i]))
+  if (n != SALT_LEN && n != SALT_LEN_OLD)
+    return 0;
+  for (i = 0; i < n; i++)
+    if (!strchr(salt_chars, s[i]))
       return 0;
-  return s[SALT_LEN] == '\0';
+  return 1;
 }
 
 /* Is ID "<YYYYmmdd>/<HH>/<MM>/<salt>" and nothing else? */

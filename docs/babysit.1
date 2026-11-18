@@ -31,6 +31,12 @@ babysit \- run a command detached, log it, and return early if it stalls
 .RB [ stdout ]
 .RB [ stderr ]
 .I child_id
+.br
+.B babysit follow\-all
+.RB [ \-\-since
+.IR secs ]
+.RB [ \-\-idle
+.IR secs ]
 .SH DESCRIPTION
 .B babysit start
 runs
@@ -49,7 +55,7 @@ prints one line and nothing else: the
 of this run (the
 .I child_id
 the other commands take), such as
-.BR 20261116/06/15/k3f9 ,
+.BR 20261116/06/15/k3f9w2mq ,
 which is all a caller needs to find the log and the command again:
 .PP
 .RS
@@ -194,6 +200,59 @@ and on one that has finished.
 The output is the log's, so it is line by line as the log has it: a line
 longer than 4096 bytes comes out in pieces, and output that stopped without
 a newline for a second has one after it.
+.TP
+.B follow\-all
+Show the output of every command under the log directory as it is written,
+on stdout, until interrupted.
+It is for a person who wants to see what all the commands being started are
+doing, without asking for each by its identifier: what
+.BR "tail \-f"
+would be if it could be pointed at logs that do not exist yet.
+.IP
+A command that is already running is followed from this moment on; one
+started later is shown from its first line, even if it has exited by the
+time it is noticed.
+Each line is the line of the log, labels and all, with the last part
+of the command's
+.I child_id
+(its eight random characters) in front to say which command wrote it:
+.IP
+.nf
+k3f9w2mq OUT: Listening on :8080
+.fi
+.IP
+Carriage returns at the end of a line, such as a program that writes CR LF
+leaves, are not printed: on a terminal they would put the next line on top
+of this one.
+The log keeps them.
+.IP
+A line
+.B "babysit: following"
+gives the full
+.I child_id
+when a command is first shown, for use with the other commands.
+New commands are noticed within a tenth of a second or so.
+.IP
+With
+.BI \-\-since " SECS"
+every log that was written to in the last
+.I SECS
+is shown as well, from its first line, whether its command is still running
+or has exited; the logs are told apart by when they were last modified.
+A log is shown whole, not only the part of it written in that time.
+.IP
+A log that nothing has been written to for
+.BI \-\-idle " SECS"
+(10 seconds if the option is not given;
+.B 0
+for never) is closed, so that commands which are running but silent do not
+each keep a file open.
+Nothing is lost by it: a closed log is looked at once a second, and when
+there is more in it, it is followed again from where it was left.
+.IP
+.B follow\-all
+takes no
+.IR child_id .
 .SH OPTIONS
 Options of
 .B start
@@ -338,7 +397,7 @@ with an identifier of its own:
 .IR YYYYmmdd / HH / MM / salt
 .RE
 .PP
-the minute it started in and four random characters.
+the minute it started in and eight random characters.
 The identifier is also where the instance lives.
 Its log is
 .PP

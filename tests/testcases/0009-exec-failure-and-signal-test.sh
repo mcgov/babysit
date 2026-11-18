@@ -25,7 +25,7 @@
 
 "$bs" start --log-dir "$work/f" -- /no/such/program >"$work/m1" 2>"$work/m1e"
 check "missing command exits 127" $? 127
-has "the identifier is printed all the same" "$work/m1" '^[0-9]\{8\}/[0-9][0-9]/[0-9][0-9]/....$'
+has "the identifier is printed all the same" "$work/m1" '^[0-9]\{8\}/[0-9][0-9]/[0-9][0-9]/........$'
 has "the error names the instance" "$work/m1e" "$(cat "$work/m1"): cannot execute"
 check "exit_code records 127" "$(cat "$work/f/$(cat "$work/m1")/exit_code")" 127
 has "the log says why" "$work/f/$(cat "$work/m1")/log" '^babysit: cannot execute: '

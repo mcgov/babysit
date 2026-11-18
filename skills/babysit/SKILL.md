@@ -68,7 +68,7 @@ to whatever you would otherwise do; do not try to install it unasked.
 ## The one idea to hold on to
 
 `babysit start` prints exactly one thing on stdout: an identifier such as
-`20261116/06/15/k3f9`. Capture it. Every later question about that run
+`20261116/06/15/k3f9w2mq`. Capture it. Every later question about that run
 (is it alive, what did it print, how did it end, stop it) is asked with
 that identifier. Never keep or act on a pid instead: a pid can be handed to
 an unrelated process once the command has exited, and the identifier

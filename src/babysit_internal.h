@@ -166,6 +166,9 @@ int cmd_info(int argc, char **argv);
 int cmd_signal(int argc, char **argv);
 int cmd_cat(int argc, char **argv);
 
+/* babysit_follow.c */
+int cmd_follow_all(int argc, char **argv);
+
 /* babysit_watch.c */
 int cmd_watch(int argc, char **argv);
 int cmd_wait(int argc, char **argv);
